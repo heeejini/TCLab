@@ -34,7 +34,9 @@ class ImplicitQLearning(nn.Module):
 
     def update(self, observations, actions, next_observations, rewards, terminals):
         with torch.no_grad():
+            # q target 은 detached 된 q_target(s,a)
             target_q = self.q_target(observations, actions)
+            # q 의 TD 타겟 계산 용 V(s') 계산 
             next_v = self.vf(next_observations)
 
         # v, next_v = compute_batched(self.vf, [observations, next_observations])
@@ -42,7 +44,7 @@ class ImplicitQLearning(nn.Module):
         # Update value function
         v = self.vf(observations)
         adv = target_q - v
-        v_loss = asymmetric_l2_loss(adv, self.tau)
+        v_loss = asymmetric_l2_loss(adv, self.tau) # expectile regression 
         self.v_optimizer.zero_grad(set_to_none=True)
         v_loss.backward()
         self.v_optimizer.step()
@@ -59,8 +61,13 @@ class ImplicitQLearning(nn.Module):
         update_exponential_moving_average(self.q_target, self.qf, self.alpha)
 
         # Update policy
+        # advantage weighting
         exp_adv = torch.exp(self.beta * adv.detach()).clamp(max=EXP_ADV_MAX)
+
         policy_out = self.policy(observations)
+
+        # bc_losses : gaussianpolicy 면, -log_prob, deterministic 이면 MSE
+
         if isinstance(policy_out, torch.distributions.Distribution):
             bc_losses = -policy_out.log_prob(actions)
         elif torch.is_tensor(policy_out):
