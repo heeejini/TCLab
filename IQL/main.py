@@ -7,7 +7,7 @@ from tqdm import trange
 from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
-from src.util import return_range, set_seed, Log, sample_batch, torchify, evaluate_policy
+from src.util import return_range, set_seed, Log, sample_batch, torchify, evaluate_policy_sim, evaluate_policy_tclab
 
 
 def get_env_and_dataset(log, npz_path, max_episode_steps = None):
@@ -63,20 +63,31 @@ def main(args):
             (2) Over 평가용: max(0, 측정온도 - 목표온도) 
             (3) Under 평가용: max(0, 목표온도 - 측정온도) 
         """
-    # def eval_policy():
+    def eval_policy():
+        if args.method == "simulator" :
+            # 시뮬레이터 evaluate_policy_sim 호출 
+            evaluate_policy_sim()
 
-    #     eval_returns = np.array([evaluate_policy(env, policy, args.max_episode_steps) \
-    #                              for _ in range(args.n_eval_episodes)])
-    #     normalized_returns = d4rl.get_normalized_score(args.env_name, eval_returns) * 100.0
-    #     log.row({
-    #         'return mean': eval_returns.mean(),
-    #         'return std': eval_returns.std(),
-    #         'normalized return mean': normalized_returns.mean(),
-    #         'normalized return std': normalized_returns.std(),
-    #     })
+        else :
+            # 실제 키트 eval 함수 호출 
+            evaluate_policy_tclab()
+
+        return 
+        # eval_returns = np.array([evaluate_policy(env, policy, args.max_episode_steps) \
+        #                          for _ in range(args.n_eval_episodes)])
+        # normalized_returns = d4rl.get_normalized_score(args.env_name, eval_returns) * 100.0
+        # log.row({
+        #     'return mean': eval_returns.mean(),
+        #     'return std': eval_returns.std(),
+        #     'normalized return mean': normalized_returns.mean(),
+        #     'normalized return std': normalized_returns.std(),
+        # })
 
     # def eval_policy  안에 실제/simul class 로 가져오기 
 
+    
+
+        
     iql = ImplicitQLearning(
         qf=TwinQ(obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden),
         vf=ValueFunction(obs_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden),
@@ -91,19 +102,20 @@ def main(args):
 
     for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
-        # 학습 중 평가 생략 
-        # if (step+1) % args.eval_period == 0:
-        #     eval_policy()
+         
+        if (step+1) % args.eval_period == 0:
+            eval_policy()
 
-        if (step + 1) % 1000 == 0 : 
-            # 1000 step 마다 로그 출력 
-            print(f"[Step {step+1}] "
-              f"V_loss: {loss_dict['v_loss']:.4f}, "
-              f"Q_loss: {loss_dict['q_loss']:.4f}, "
-              f"Policy_loss: {loss_dict['policy_loss']:.4f}",
-              f"R̄:{loss_dict['reward_mean']:.3f}")
-            loss_dict.update({'step': step + 1})
-            log.row(loss_dict)
+        # reward 뽑아야될 듯 
+        # if (step + 1) % 1000 == 0 : 
+        #     # 1000 step 마다 로그 출력 
+        #     print(f"[Step {step+1}] "
+        #       f"V_loss: {loss_dict['v_loss']:.4f}, "
+        #       f"Q_loss: {loss_dict['q_loss']:.4f}, "
+        #       f"Policy_loss: {loss_dict['policy_loss']:.4f}",
+        #       f"R̄:{loss_dict['reward_mean']:.3f}")
+        #     loss_dict.update({'step': step + 1})
+        #     log.row(loss_dict)
 
 
     torch.save(iql.state_dict(), log.dir/'final.pt')
@@ -130,4 +142,5 @@ if __name__ == '__main__':
     parser.add_argument('--n-eval-episodes', type=int, default=10)
     parser.add_argument('--max-episode-steps', type=int, default=1000)
     parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset.npz')
+    parser.add_argument('--method', description='simulator or tclab', default='simulator') # eval 시에 어떤 것을 통해서 할 지
     main(parser.parse_args())
