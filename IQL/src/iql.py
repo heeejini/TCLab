@@ -80,3 +80,12 @@ class ImplicitQLearning(nn.Module):
         policy_loss.backward()
         self.policy_optimizer.step()
         self.policy_lr_schedule.step()
+        reward_mean = rewards.mean().item()
+
+        return {
+            'v_loss' : v_loss.item(),
+            'q_loss' : q_loss.item(),
+            'policy_loss' : policy_loss.item(), 
+            'reward_mean' : reward_mean
+
+        }
