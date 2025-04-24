@@ -26,6 +26,9 @@ from tqdm import trange
 
 from tclab import setup, TCLab  # 시뮬레이터 & 실제
 
+def compute_reward(e1, e2):
+    return -math.hypot(e1, e2)
+
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
                         dt: float          = 5.0,      # sample / control interval
@@ -82,6 +85,7 @@ def simulator_policy(
     run_dir = Path(log_root) / f"sim_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+
     # --- 시뮬레이터 환경 생성 ---
     lab = setup(connected=False)
     env = lab(synced=False)
@@ -112,10 +116,11 @@ def simulator_policy(
         Q2[k] = float(np.clip(act[1], 0, 100))
         env.Q1(Q1[k]); env.Q2(Q2[k])
 
-        reward = -math.hypot(T1[k] - Tsp1[k], T2[k] - Tsp2[k])
-        total_ret += reward
 
         err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
+        reward = compute_reward(err1, err2)
+        total_ret += reward
+        
         e1 += abs(err1);  e2 += abs(err2)
         over  += max(0, -err1) + max(0, -err2)
         under += max(0,  err1) + max(0,  err2)
@@ -188,6 +193,9 @@ def tclab_policy(
             total_ret += reward
 
             err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
+            reward = compute_reward(err1, err2)
+            total_ret += reward
+            
             e1 += abs(err1);  e2 += abs(err2)
             over  += max(0, -err1) + max(0, -err2)
             under += max(0,  err1) + max(0,  err2)
