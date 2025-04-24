@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
-from eval_policy import simulator_policy, tclab_policy
+from .eval_policy import simulator_policy, tclab_policy
 
 DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -177,15 +177,27 @@ class Log:
         self.write(*args, **kwargs)
 
     def row(self, dict):
+        # ndarray나 list 값을 float로 변환
+        for k, v in dict.items():
+            if isinstance(v, (np.ndarray, list)):
+                dict[k] = float(np.mean(v))
+
+        # CSV writer 초기화
         if self.csv_file is None:
+            self.fieldnames = sorted(dict.keys())  # 알파벳 순으로 고정
             self.csv_file = open(self.dir/self.csv_filename, 'w', newline='')
-            self.csv_writer = csv.DictWriter(self.csv_file, list(dict.keys()))
+            self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=self.fieldnames)
             self.csv_writer.writeheader()
 
-        self(str(dict))
-        self.csv_writer.writerow(dict)
+        # 누락된 key는 빈칸으로 채움 (dict가 fieldnames를 항상 포함하도록)
+        row_data = {key: dict.get(key, "") for key in self.fieldnames}
+
+        self(str(row_data))
+        self.csv_writer.writerow(row_data)
         if self.flush:
             self.csv_file.flush()
+
+
 
     def close(self):
         self.txt_file.close()

@@ -8,6 +8,8 @@ from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.util import return_range, set_seed, Log, sample_batch, torchify, evaluate_policy_sim, evaluate_policy_tclab
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 def get_env_and_dataset(log, npz_path, max_episode_steps = None):
@@ -25,6 +27,7 @@ def get_env_and_dataset(log, npz_path, max_episode_steps = None):
 
 def main(args):
     torch.set_num_threads(1)
+    
     log = Log(Path(args.log_dir)/args.env_name, vars(args))
     log(f'Log dir: {log.dir}')
 
@@ -39,13 +42,20 @@ def main(args):
         policy = GaussianPolicy(obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden)
 
 
-    def eval_policy():
-        if args.method == "simulator":
-            result = evaluate_policy_sim(policy, args)
-        else:
-            result = evaluate_policy_tclab(policy, args)
+    # def eval_policy():
+    #     if args.method == "simulator":
+    #         result = evaluate_policy_sim(policy, args)
+    #     else:
+    #         result = evaluate_policy_tclab(policy, args)
 
-        log.row(result)
+    #     log.row(result)
+
+    def eval_policy( policy, args):
+        if args.method == "simulator":
+            return evaluate_policy_sim(policy, args)
+        else:
+            return evaluate_policy_tclab(policy, args)
+
 
         # eval_returns = np.array([evaluate_policy(env, policy, args.max_episode_steps) \
         #                          for _ in range(args.n_eval_episodes)])
@@ -76,9 +86,44 @@ def main(args):
 
     for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
-         
-        if (step+1) % args.eval_period == 0:
-            eval_policy()
+
+        # ───────────────────────────────────────────────────────────────
+        # ① 5 k step마다 정책 출력 범위 확인
+        # ───────────────────────────────────────────────────────────────
+        if (step + 1) % 5_000 == 0:         # ← 주기 원하는 대로
+            with torch.no_grad():
+                test_obs = dataset['observations'][:1000]        # 1 000개 샘플
+                test_act = iql.policy(test_obs).cpu().numpy()    # 네트워크 **현재** 출력
+            print(f"[Debug {step+1}] action range : {test_act.min():.3f}  ~  {test_act.max():.3f}")
+
+        # ───────────────────────────────────────────────────────────────
+        # ② (선택) 평가 & 로그
+        # ───────────────────────────────────────────────────────────────
+        if (step + 1) % args.eval_period == 0:
+            metrics = eval_policy(iql.policy, args)
+            metrics.update({'step': step + 1})
+
+            # → loss_dict 병합
+            full_log = loss_dict.copy()
+            full_log.update(metrics)
+
+            # float 처리 (안전하게)
+            for k, v in full_log.items():
+                if isinstance(v, torch.Tensor):
+                    full_log[k] = v.item() if v.numel() == 1 else float(v.mean().item())
+                elif isinstance(v, (np.ndarray, list)):
+                    full_log[k] = float(np.mean(v))
+                elif not isinstance(v, (int, float)):
+                    full_log[k] = str(v)
+
+            print(f"\n[Step {step+1}] Evaluation:")
+            for k, v in full_log.items():
+                if isinstance(v, float):
+                    print(f"  {k}: {v:.3f}")
+                else:
+                    print(f"  {k}: {v}")
+
+            log.row(full_log)
 
         # reward 뽑아야될 듯 
         # if (step + 1) % 1000 == 0 : 
@@ -105,7 +150,7 @@ if __name__ == '__main__':
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
-    parser.add_argument('--n-steps', type=int, default=10**4 * 5 ) # 50만 step 만 돌아도 충분히 수렴
+    parser.add_argument('--n-steps', type=int, default=10**5 * 5 ) # 50만 step 만 돌아도 충분히 수렴
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--alpha', type=float, default=0.005)
@@ -117,7 +162,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset.npz')
-    parser.add_argument('--method', description='simulator or tclab', default='simulator') # eval 시에 어떤 것을 통해서 할 지
+    parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
     main(parser.parse_args())
 
 

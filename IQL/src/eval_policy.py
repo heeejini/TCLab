@@ -25,7 +25,7 @@ import torch
 from tqdm import trange
 
 from tclab import setup, TCLab  # 시뮬레이터 & 실제
-from util import torchify, set_seed
+
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
                         dt: float          = 5.0,      # sample / control interval
@@ -75,6 +75,7 @@ def simulator_policy(
     ambient: float = 29.0, # start_temp 
     deterministic: bool = True
 ):
+    from .util import torchify, set_seed
     steps = int(total_time_sec/dt)
     """TCLab 시뮬레이터(setup(connected=False))에서 정책 평가"""
     set_seed(seed)
@@ -152,6 +153,7 @@ def tclab_policy(
     deterministic: bool = True,
 ):
     """실제 USB‑TCLab 장치에서 정책 평가"""
+    from .util import torchify, set_seed
     steps = int(total_time_sec / dt)
     set_seed(seed)
     run_dir = Path(log_root) / f"real_seed{seed}"
