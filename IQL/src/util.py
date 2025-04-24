@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
-
+from eval_policy import simulator_policy, tclab_policy
 
 DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -93,20 +93,47 @@ def sample_batch(dataset, batch_size):
     return {k: v[indices] for k, v in dataset.items()}
 
 
-def evaluate_policy(env, policy, max_episode_steps, deterministic=True):
-    # 학습된 정책을 실제로 평가해서 총 reward 를 측정, offline 학습 이후에 policy의 성능을 평가할 때 사용
-    obs = env.reset()
-    total_reward = 0.
-    for _ in range(max_episode_steps):
-        with torch.no_grad():
-            action = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
-        next_obs, reward, done, info = env.step(action)
-        total_reward += reward
-        if done:
-            break
-        else:
-            obs = next_obs
-    return total_reward
+# def evaluate_policy(env, policy, max_episode_steps, deterministic=True):
+#     # 학습된 정책을 실제로 평가해서 총 reward 를 측정, offline 학습 이후에 policy의 성능을 평가할 때 사용
+#     obs = env.reset()
+#     total_reward = 0.
+#     for _ in range(max_episode_steps):
+#         with torch.no_grad():
+#             action = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
+#         next_obs, reward, done, info = env.step(action)
+#         total_reward += reward
+#         if done:
+#             break
+#         else:
+#             obs = next_obs
+#     return total_reward
+####
+# simluator 랑 tclab 실제에서의 evaluate_policy 가 필요할 것 
+
+
+
+def evaluate_policy_sim(policy, args):
+    return simulator_policy(
+        policy=policy,
+        total_time_sec=args.max_episode_steps,
+        dt=args.sample_interval if hasattr(args, 'sample_interval') else 5.0,
+        log_root="./eval_sim_logs",
+        seed=args.seed,
+        ambient=29.0,
+        deterministic=args.deterministic_policy
+    )
+
+def evaluate_policy_tclab(policy, args):
+    return tclab_policy(
+        policy=policy,
+        total_time_sec=args.max_episode_steps,
+        dt=args.sample_interval if hasattr(args, 'sample_interval') else 5.0,
+        log_root="./eval_real_logs",
+        seed=args.seed,
+        ambient=29.0,
+        deterministic=args.deterministic_policy
+    )
+
 
 
 def set_seed(seed, env=None):

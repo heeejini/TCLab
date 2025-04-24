@@ -23,25 +23,6 @@ def get_env_and_dataset(log, npz_path, max_episode_steps = None):
     return None, dataset 
 
 
-
-# def get_env_and_dataset(log, env_name, max_episode_steps):
-#     env = gym.make(env_name)
-#     dataset = d4rl.qlearning_dataset(env)
-
-#     if any(s in env_name for s in ('halfcheetah', 'hopper', 'walker2d')):
-#         min_ret, max_ret = return_range(dataset, max_episode_steps)
-#         log(f'Dataset returns have range [{min_ret}, {max_ret}]')
-#         dataset['rewards'] /= (max_ret - min_ret)
-#         dataset['rewards'] *= max_episode_steps
-#     elif 'antmaze' in env_name:
-#         dataset['rewards'] -= 1.
-
-#     for k, v in dataset.items():
-#         dataset[k] = torchify(v)
-
-#     return env, dataset
-
-
 def main(args):
     torch.set_num_threads(1)
     log = Log(Path(args.log_dir)/args.env_name, vars(args))
@@ -57,22 +38,15 @@ def main(args):
     else:
         policy = GaussianPolicy(obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden)
 
-        """
-        평가기준:
-            (1) E1|목표온도 – 측정온도| +  E2|목표온도 – 측정온도|  ← 주 평가기준
-            (2) Over 평가용: max(0, 측정온도 - 목표온도) 
-            (3) Under 평가용: max(0, 목표온도 - 측정온도) 
-        """
+
     def eval_policy():
-        if args.method == "simulator" :
-            # 시뮬레이터 evaluate_policy_sim 호출 
-            evaluate_policy_sim()
+        if args.method == "simulator":
+            result = evaluate_policy_sim(policy, args)
+        else:
+            result = evaluate_policy_tclab(policy, args)
 
-        else :
-            # 실제 키트 eval 함수 호출 
-            evaluate_policy_tclab()
+        log.row(result)
 
-        return 
         # eval_returns = np.array([evaluate_policy(env, policy, args.max_episode_steps) \
         #                          for _ in range(args.n_eval_episodes)])
         # normalized_returns = d4rl.get_normalized_score(args.env_name, eval_returns) * 100.0
@@ -137,10 +111,19 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--tau', type=float, default=0.7)
     parser.add_argument('--beta', type=float, default=3.0)
-    parser.add_argument('--deterministic-policy', action='store_true')
+    parser.add_argument('--deterministic-policy',default=True, action='store_true')
     parser.add_argument('--eval-period', type=int, default=5000)
     parser.add_argument('--n-eval-episodes', type=int, default=10)
-    parser.add_argument('--max-episode-steps', type=int, default=1000)
+    parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
+    parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset.npz')
     parser.add_argument('--method', description='simulator or tclab', default='simulator') # eval 시에 어떤 것을 통해서 할 지
     main(parser.parse_args())
+
+
+"""
+    평가기준:
+        (1) E1|목표온도 – 측정온도| +  E2|목표온도 – 측정온도|  ← 주 평가기준
+        (2) Over 평가용: max(0, 측정온도 - 목표온도) 
+        (3) Under 평가용: max(0, 목표온도 - 측정온도) 
+"""

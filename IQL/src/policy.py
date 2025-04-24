@@ -8,14 +8,17 @@ from .util import mlp
 LOG_STD_MIN = -5.0
 LOG_STD_MAX = 2.0
 
+# stochastic policy function and deterministic policy function 
 
 class GaussianPolicy(nn.Module):
+    # 확률적정책 
     def __init__(self, obs_dim, act_dim, hidden_dim=256, n_hidden=2):
         super().__init__()
         self.net = mlp([obs_dim, *([hidden_dim] * n_hidden), act_dim])
         self.log_std = nn.Parameter(torch.zeros(act_dim, dtype=torch.float32))
 
-    def forward(self, obs):
+    def forward(self, obs):\
+        # 상태 obs 를 받아서 평균 mean 과 공분산 scale_tril 로 다변량 정규분포를 생성함 
         mean = self.net(obs)
         std = torch.exp(self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
         scale_tril = torch.diag(std)
@@ -29,10 +32,13 @@ class GaussianPolicy(nn.Module):
     def act(self, obs, deterministic=False, enable_grad=False):
         with torch.set_grad_enabled(enable_grad):
             dist = self(obs)
+            # exploration 시에는 dist.sample() , evaluation 시에는 dist.mean() 사용 
             return dist.mean if deterministic else dist.sample()
 
 
 class DeterministicPolicy(nn.Module):
+    # 결정론적 정책 
+    # 상태를 받아서 직접 행동을 출력함 
     def __init__(self, obs_dim, act_dim, hidden_dim=256, n_hidden=2):
         super().__init__()
         self.net = mlp([obs_dim, *([hidden_dim] * n_hidden), act_dim],
