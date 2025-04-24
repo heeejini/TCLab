@@ -45,7 +45,8 @@ class DeterministicPolicy(nn.Module):
                        output_activation=nn.Tanh)
 
     def forward(self, obs):
-        return self.net(obs)
+        out = self.net(obs)         # ∈ [-1, 1]
+        return 50.0 * (out + 1.0)   # → ∈ [0, 100]
 
     def act(self, obs, deterministic=False, enable_grad=False):
         with torch.set_grad_enabled(enable_grad):

@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from .util import DEFAULT_DEVICE, compute_batched, update_exponential_moving_average
 
 
-EXP_ADV_MAX = 100.
+EXP_ADV_MAX = 100
 
 
 def asymmetric_l2_loss(u, tau):

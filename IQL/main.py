@@ -83,17 +83,40 @@ def main(args):
         alpha=args.alpha,
         discount=args.discount
     )
-
+    with torch.no_grad():
+            obs = dataset['observations'][:5000]
+            act = dataset['actions'][:5000]
+            adv = iql.qf(obs, act) - iql.vf(obs)
+    print("[Init Advantage] mean:", adv.mean().item(),
+            "std:", adv.std().item())
     for step in trange(args.n_steps):
+      #  print(f"[Debug] args.deterministic_policy: {args.deterministic_policy}")
+
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
 
+        # print("log_std:", iql.policy.log_std.data.cpu().numpy())
+
+        # if hasattr(iql.policy, "log_std"):
+        #     print(f"[Debug {step+1}] log_std: {iql.policy.log_std.data.cpu().numpy()}")
+        #     if iql.policy.log_std.grad is not None:
+        #         print(f"✅ [Debug {step+1}] log_std.grad: {iql.policy.log_std.grad.data.cpu().numpy()}")
+        #     else:
+        #         print(f"⚠️  [Debug {step+1}] log_std.grad is None (maybe grad not flowing?)")
         # ───────────────────────────────────────────────────────────────
         # ① 5 k step마다 정책 출력 범위 확인
         # ───────────────────────────────────────────────────────────────
-        if (step + 1) % 5_000 == 0:         # ← 주기 원하는 대로
+        if (step + 1) % 5_000 == 0:
             with torch.no_grad():
-                test_obs = dataset['observations'][:1000]        # 1 000개 샘플
-                test_act = iql.policy(test_obs).cpu().numpy()    # 네트워크 **현재** 출력
+                test_obs = dataset['observations'][:5000]
+                act = dataset['actions'][:5000]
+                adv = iql.qf(test_obs, act) - iql.vf(test_obs)
+    
+                if isinstance(iql.policy, DeterministicPolicy):
+                    test_act = iql.policy(test_obs).cpu().numpy()
+                else:
+                    dist = iql.policy(test_obs)
+                    test_act = dist.sample().cpu().numpy()
+            print(f"[Step {step+1}] Advantage mean={adv.mean():.4f}, std={adv.std():.4f}")
             print(f"[Debug {step+1}] action range : {test_act.min():.3f}  ~  {test_act.max():.3f}")
 
         # ───────────────────────────────────────────────────────────────
@@ -156,13 +179,17 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--tau', type=float, default=0.7)
     parser.add_argument('--beta', type=float, default=3.0)
-    parser.add_argument('--deterministic-policy',default=True, action='store_true')
+    parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
+
     parser.add_argument('--eval-period', type=int, default=5000)
     parser.add_argument('--n-eval-episodes', type=int, default=10)
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
-    parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset.npz')
+    parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset_merged.npz')
+
+    
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
+    
     main(parser.parse_args())
 
 
