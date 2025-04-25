@@ -53,6 +53,14 @@ class ImplicitQLearning(nn.Module):
         targets = rewards + (1. - terminals.float()) * self.discount * next_v.detach()
         qs = self.qf.both(observations, actions)
         q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
+
+        """
+        rewards = rewards.squeeze(-1)
+        terminals = terminals.squeeze(-1)
+        targets = rewards + (1. - terminals.float()) * self.discount * next_v.detach()
+        qs = self.qf.both(observations, actions)
+        q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
+        """
         self.q_optimizer.zero_grad(set_to_none=True)
         q_loss.backward()
         self.q_optimizer.step()
