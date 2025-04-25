@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from tqdm import trange
+import wandb
 
 from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
@@ -27,7 +28,12 @@ def get_env_and_dataset(log, npz_path, max_episode_steps = None):
 
 def main(args):
     torch.set_num_threads(1)
-    
+    wandb.init(
+        project="tclab-project",
+        name=args.exp_name,
+        entity="jhj0628",
+        config=vars(args)  # 모든 하이퍼파라미터 자동 저장
+    )
     log = Log(Path(args.log_dir)/args.env_name, vars(args))
     log(f'Log dir: {log.dir}')
 
@@ -90,7 +96,7 @@ def main(args):
     print("[Init Advantage] mean:", adv.mean().item(),
             "std:", adv.std().item())
     for step in trange(args.n_steps):
-      #  print(f"[Debug] args.deterministic_policy: {args.deterministic_policy}")
+        #print(f"[Debug] args.deterministic_policy: {args.deterministic_policy}")
 
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
 
@@ -147,7 +153,7 @@ def main(args):
                     print(f"  {k}: {v}")
 
             log.row(full_log)
-
+            wandb.log(full_log)
         # reward 뽑아야될 듯 
         # if (step + 1) % 1000 == 0 : 
         #     # 1000 step 마다 로그 출력 
@@ -161,6 +167,7 @@ def main(args):
 
 
     torch.save(iql.state_dict(), log.dir/'final.pt')
+    wandb.finish()
     log.close()
 
 
@@ -177,15 +184,17 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--alpha', type=float, default=0.005)
-    parser.add_argument('--tau', type=float, default=0.7)
+    parser.add_argument('--tau', type=float, default=0.8)
     parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
-
     parser.add_argument('--eval-period', type=int, default=5000)
     parser.add_argument('--n-eval-episodes', type=int, default=10)
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
-    parser.add_argument('--npz-path', default='C:\\Users\\Developer\\TCLab\\Data\\mpc_dataset_merged.npz')
+    parser.add_argument('--exp_name', default='iql_default')
+    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\mpc_newreward.npz")
+    
+    #parser.add_argument('--npz-path', default='C:\\Users\Developer\\TCLab\\Data\\mpc_dataset.npz')
 
     
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
