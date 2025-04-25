@@ -26,9 +26,11 @@ from tqdm import trange
 
 from tclab import setup, TCLab  # 시뮬레이터 & 실제
 
-def compute_reward(e1, e2):
-    return -math.hypot(e1, e2)
+# def compute_reward(e1, e2):
+#     return -math.hypot(e1, e2)
 
+def compute_reward(acc_error1, acc_error2, E1=1.0, E2=1.0):
+    return - (E1 * acc_error1 + E2 * acc_error2)
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
                         dt: float          = 5.0,      # sample / control interval
@@ -105,19 +107,32 @@ def simulator_policy(
     total_ret = e1 = e2 = over = under = 0.0
     policy.eval()
 
+    ### 추가 된 내용들 => 누적 에러 사용 
+    acc_error1 = 0.0 
+    acc_error2 = 0.0
+    ###
+    
     for k in trange(steps, desc="sim"):  # 1 s per step
         env.update(t=k * dt)
-        T1[k] = env.T1 ;  T2[k] = env.T2
+        T1[k] = env.T1   
+        T2[k] = env.T2
 
         obs = np.array([T1[k], T2[k], Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
             act = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
         Q1[k] = float(np.clip(act[0], 0, 100))
         Q2[k] = float(np.clip(act[1], 0, 100))
-        env.Q1(Q1[k]); env.Q2(Q2[k])
+        env.Q1(Q1[k])
+        env.Q2(Q2[k])
 
 
+        # 현재 에러계산 
         err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
+
+        # 누적 에러 업데이트 
+        acc_error1 += abs(err1)
+        acc_error2 += abs(err2)
+
         reward = compute_reward(err1, err2)
         total_ret += reward
         
@@ -189,8 +204,6 @@ def tclab_policy(
             Q1[k] = float(np.clip(act[0], 0, 100))
             Q2[k] = float(np.clip(act[1], 0, 100))
             arduino.Q1(Q1[k]); arduino.Q2(Q2[k])
-            reward = -math.hypot(T1[k] - Tsp1[k], T2[k] - Tsp2[k])
-            total_ret += reward
 
             err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
             reward = compute_reward(err1, err2)
