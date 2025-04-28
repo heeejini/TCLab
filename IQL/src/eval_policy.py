@@ -29,8 +29,17 @@ from tclab import setup, TCLab  # 시뮬레이터 & 실제
 # def compute_reward(e1, e2):
 #     return -math.hypot(e1, e2)
 
+# def compute_reward(acc_error1, acc_error2, E1=1.0, E2=1.0):
+#     return - (E1 * acc_error1 + E2 * acc_error2)
+
+EPS = 1e-6
+REWARD_MIN = -26.0 
+REWARD_MAX = -6.0  
+
+
 def compute_reward(acc_error1, acc_error2, E1=1.0, E2=1.0):
-    return - (E1 * acc_error1 + E2 * acc_error2)
+    reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
+    return reward
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
                         dt: float          = 5.0,      # sample / control interval
