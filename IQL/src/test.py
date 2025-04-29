@@ -67,7 +67,7 @@ def sim_evaluate_policy(
     policy,
     max_steps=1200,
     log_root="./eval_logs",
-    seed=1,
+    seed=2,
     ambient=29.0,
     deterministic=True,
 ):
@@ -156,7 +156,7 @@ metrics = sim_evaluate_policy(
     policy=policy_net,
     max_steps=1200,
     log_root=EVAL_LOG_ROOT,
-    seed=1,
+    seed=2,
     ambient=29.0,
     deterministic=True
 )

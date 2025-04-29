@@ -3,6 +3,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# D4RL 의 데이터로 진행한 거여서 수정 필요함 
+
 
 LOCOMOTION_ENVS = {
     'halfcheetah-medium-v2': 47.4,

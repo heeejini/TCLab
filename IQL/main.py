@@ -25,7 +25,26 @@ def get_env_and_dataset(log, npz_path, max_episode_steps = None):
         log(f"  {k:17s} shape={tuple(v.shape)} dtype={v.dtype}")
     return None, dataset 
 
+# def get_env_and_dataset(log, dataset_path, simmul):
+#     if simmul:
+#         from tclab import setup
+#         lab = setup(connected=False)
+#         env = lab(synced=False)
+#     else:
+#         env = tclab.TCLab()
+#     env.Q1(0)
+#     env.Q2(0)
 
+#     dataset_np = np.load(dataset_path)
+#     dataset = {k: torchify(v) for k, v in dataset_np.items()}
+
+#     reward_scale = 20
+#     r = dataset['rewards']
+#     dataset['rewards'] = normalize_reward(r,reward_scale=reward_scale)
+
+#     log(f"✅ reward normalized [-1, 1] and scaled ×{reward_scale}")
+#     log(f"Loaded dataset with {len(dataset['observations'])} transitions from {dataset_path}")
+#     return env, dataset
 def main(args):
     torch.set_num_threads(1)
     wandb.init(
@@ -95,28 +114,24 @@ def main(args):
             adv = iql.qf(obs, act) - iql.vf(obs)
     print("[Init Advantage] mean:", adv.mean().item(),
             "std:", adv.std().item())
-    for step in trange(args.n_steps):
-        #print(f"[Debug] args.deterministic_policy: {args.deterministic_policy}")
+        
+    best_total_error = float('inf')
+    best_total_return = -float('inf')
+    best_q_loss = float('inf')
+    best_v_loss = float('inf')
+    best_policy_loss = float('inf')
 
+    best_step = -1
+
+    for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
 
-        # print("log_std:", iql.policy.log_std.data.cpu().numpy())
-
-        # if hasattr(iql.policy, "log_std"):
-        #     print(f"[Debug {step+1}] log_std: {iql.policy.log_std.data.cpu().numpy()}")
-        #     if iql.policy.log_std.grad is not None:
-        #         print(f"✅ [Debug {step+1}] log_std.grad: {iql.policy.log_std.grad.data.cpu().numpy()}")
-        #     else:
-        #         print(f"⚠️  [Debug {step+1}] log_std.grad is None (maybe grad not flowing?)")
-        # ───────────────────────────────────────────────────────────────
-        # ① 5 k step마다 정책 출력 범위 확인
-        # ───────────────────────────────────────────────────────────────
         if (step + 1) % 5_000 == 0:
             with torch.no_grad():
                 test_obs = dataset['observations'][:5000]
                 act = dataset['actions'][:5000]
                 adv = iql.qf(test_obs, act) - iql.vf(test_obs)
-    
+        
                 if isinstance(iql.policy, DeterministicPolicy):
                     test_act = iql.policy(test_obs).cpu().numpy()
                 else:
@@ -125,18 +140,14 @@ def main(args):
             print(f"[Step {step+1}] Advantage mean={adv.mean():.4f}, std={adv.std():.4f}")
             print(f"[Debug {step+1}] action range : {test_act.min():.3f}  ~  {test_act.max():.3f}")
 
-        # ───────────────────────────────────────────────────────────────
-        # ② (선택) 평가 & 로그
-        # ───────────────────────────────────────────────────────────────
         if (step + 1) % args.eval_period == 0:
             metrics = eval_policy(iql.policy, args)
             metrics.update({'step': step + 1})
 
-            # → loss_dict 병합
             full_log = loss_dict.copy()
             full_log.update(metrics)
 
-            # float 처리 (안전하게)
+            # float 처리
             for k, v in full_log.items():
                 if isinstance(v, torch.Tensor):
                     full_log[k] = v.item() if v.numel() == 1 else float(v.mean().item())
@@ -152,24 +163,60 @@ def main(args):
                 else:
                     print(f"  {k}: {v}")
 
+            # === Best Model 저장하기 ===
+            try:
+                total_error = (full_log['E1'] + full_log['E2'] + full_log['Over'] + full_log['Under'])
+                full_log['total_error'] = total_error  # 📝 full_log에 기록 추가
+
+                if total_error < best_total_error:
+                    best_total_error = total_error
+                    best_step = step + 1
+                    torch.save(iql.state_dict(), log.dir/'best.pt')
+                    print(f"✅ [Step {step+1}] Best model (Total Error) saved!")
+            except KeyError:
+                print("⚠️ Warning: E1, E2, Over, Under 값이 metrics에 없습니다.")
+
+            # Best total_return (클수록 좋음)
+            if full_log.get('total_return', -1e9) > best_total_return:
+                best_total_return = full_log['total_return']
+                torch.save(iql.state_dict(), log.dir/'best_return.pt')
+                print(f"✅ [Step {step+1}] Best model (Total Return) saved!")
+
+            # Best q_loss (작을수록 좋음)
+            if full_log.get('q_loss', 1e9) < best_q_loss:
+                best_q_loss = full_log['q_loss']
+                torch.save(iql.state_dict(), log.dir/'best_q.pt')
+                print(f"✅ [Step {step+1}] Best model (Q Loss) saved!")
+
+            # Best v_loss (작을수록 좋음)
+            if full_log.get('v_loss', 1e9) < best_v_loss:
+                best_v_loss = full_log['v_loss']
+                torch.save(iql.state_dict(), log.dir/'best_v.pt')
+                print(f"✅ [Step {step+1}] Best model (V Loss) saved!")
+
+            # Best policy_loss (작을수록 좋음)
+            if full_log.get('policy_loss', 1e9) < best_policy_loss:
+                best_policy_loss = full_log['policy_loss']
+                torch.save(iql.state_dict(), log.dir/'best_policy.pt')
+                print(f"✅ [Step {step+1}] Best model (Policy Loss) saved!")
+
             log.row(full_log)
             wandb.log(full_log)
-        # reward 뽑아야될 듯 
-        # if (step + 1) % 1000 == 0 : 
-        #     # 1000 step 마다 로그 출력 
-        #     print(f"[Step {step+1}] "
-        #       f"V_loss: {loss_dict['v_loss']:.4f}, "
-        #       f"Q_loss: {loss_dict['q_loss']:.4f}, "
-        #       f"Policy_loss: {loss_dict['policy_loss']:.4f}",
-        #       f"R̄:{loss_dict['reward_mean']:.3f}")
-        #     loss_dict.update({'step': step + 1})
-        #     log.row(loss_dict)
 
-
+    # 학습 끝난 후 최종 모델 저장
     torch.save(iql.state_dict(), log.dir/'final.pt')
+
+    # Best 결과 기록
+    with open(log.dir/'best_info.txt', 'w') as f:
+        f.write(f"Best Step (Total Error 기준): {best_step}\n")
+        f.write(f"Best Total Error: {best_total_error:.3f}\n")
+        f.write(f"Best Total Return: {best_total_return:.3f}\n")
+        f.write(f"Best Q Loss: {best_q_loss:.3f}\n")
+        f.write(f"Best V Loss: {best_v_loss:.3f}\n")
+        f.write(f"Best Policy Loss: {best_policy_loss:.3f}\n")
+
     wandb.finish()
     log.close()
-
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
@@ -180,11 +227,11 @@ if __name__ == '__main__':
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
-    parser.add_argument('--n-steps', type=int, default=10**5 * 5 ) # 50만 step 만 돌아도 충분히 수렴
+    parser.add_argument('--n-steps', type=int, default=10**5 *3) # 50만 step 만 돌아도 충분히 수렴
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--alpha', type=float, default=0.005)
-    parser.add_argument('--tau', type=float, default=0.8)
+    parser.add_argument('--tau', type=float, default=0.9)
     parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
     parser.add_argument('--eval-period', type=int, default=5000)
@@ -192,7 +239,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
-    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\mpc_newreward.npz")
+    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\mpc_reward_weight.npz")
     
     #parser.add_argument('--npz-path', default='C:\\Users\Developer\\TCLab\\Data\\mpc_dataset.npz')
 

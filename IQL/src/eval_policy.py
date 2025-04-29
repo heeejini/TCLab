@@ -36,9 +36,12 @@ EPS = 1e-6
 REWARD_MIN = -26.0 
 REWARD_MAX = -6.0  
 
+E1, E2 = 1.0, 2.0 
 
-def compute_reward(acc_error1, acc_error2, E1=1.0, E2=1.0):
-    reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
+def compute_reward(acc_error1, acc_error2):
+    #reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
+    reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
+
     return reward
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
