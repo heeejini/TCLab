@@ -32,68 +32,76 @@ class ImplicitQLearning(nn.Module):
         self.discount = discount
         self.alpha = alpha
 
+    @staticmethod
+    def _two_step(optimizer, loss_closure):
+        """
+        loss_closure() -> torch.Tensor
+        └ 한번의 호출로 loss 계산·backward 까지 수행해야 한다.
+        • SAM   : first_step → second_step  (2× forward/backward)
+        • 일반 옵티마이저 : step() 한 번
+        return (loss_val, loss_val_second)  # 후자는 SAM일 때만 유효
+        """
+        loss = loss_closure()
+        loss.backward()
+        if hasattr(optimizer, "first_step"):          # SAM 여부 판정
+            optimizer.first_step(zero_grad=True)
+
+            loss_second = loss_closure()              # perturbed weights
+            loss_second.backward()
+            optimizer.second_step(zero_grad=True)
+            return loss.detach(), loss_second.detach()
+        else:                                         # Adam / SGD 등
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            return loss.detach(), None
+    # ------------------------------------------------------------------ #
     def update(self, observations, actions, next_observations, rewards, terminals):
+        # ---------- 0. 타깃 계산 (no_grad) ---------------------------------
         with torch.no_grad():
-            # q target 은 detached 된 q_target(s,a)
             target_q = self.q_target(observations, actions)
-            # q 의 TD 타겟 계산 용 V(s') 계산 
-            next_v = self.vf(next_observations)
+            next_v   = self.vf(next_observations)
+            targets  = rewards + (1. - terminals.float()) * self.discount * next_v
 
-        # v, next_v = compute_batched(self.vf, [observations, next_observations])
+        # ---------- 1. V 업데이트 ------------------------------------------
+        def v_loss_fn():
+            v   = self.vf(observations)
+            adv = target_q - v
+            return asymmetric_l2_loss(adv, self.tau)
 
-        # Update value function
-        v = self.vf(observations)
-        adv = target_q - v
-        v_loss = asymmetric_l2_loss(adv, self.tau) # expectile regression 
-        self.v_optimizer.zero_grad(set_to_none=True)
-        v_loss.backward()
-        self.v_optimizer.step()
+        v_loss, _ = self._two_step(self.v_optimizer, v_loss_fn)
 
-        # Update Q function
-        targets = rewards + (1. - terminals.float()) * self.discount * next_v.detach()
-        qs = self.qf.both(observations, actions)
-        q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
+        # ---------- 2. Q 업데이트 ------------------------------------------
+        def q_loss_fn():
+            qs = self.qf.both(observations, actions)
+            return sum(F.mse_loss(q, targets) for q in qs) / len(qs)
 
-        """
-        rewards = rewards.squeeze(-1)
-        terminals = terminals.squeeze(-1)
-        targets = rewards + (1. - terminals.float()) * self.discount * next_v.detach()
-        qs = self.qf.both(observations, actions)
-        q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
-        """
-        self.q_optimizer.zero_grad(set_to_none=True)
-        q_loss.backward()
-        self.q_optimizer.step()
+        q_loss, _ = self._two_step(self.q_optimizer, q_loss_fn)
 
-        # Update target Q network
+        # ---------- 3. 타깃 Q EMA -----------------------------------------
         update_exponential_moving_average(self.q_target, self.qf, self.alpha)
 
-        # Update policy
-        # advantage weighting
-        exp_adv = torch.exp(self.beta * adv.detach()).clamp(max=EXP_ADV_MAX)
+        # ---------- 4. Policy 업데이트 -------------------------------------
+        def policy_loss_fn():
+            # advantage 재계산 (V가 갱신됐으므로 새로 평가)
+            with torch.no_grad():
+                v   = self.vf(observations)
+                adv = target_q - v
+                exp_adv = torch.exp(self.beta * adv).clamp(max=EXP_ADV_MAX)
 
-        policy_out = self.policy(observations)
+            policy_out = self.policy(observations)
+            if isinstance(policy_out, torch.distributions.Distribution):
+                bc_losses = -policy_out.log_prob(actions)
+            else:  # deterministic
+                bc_losses = torch.sum((policy_out - actions) ** 2, dim=1)
 
-        # bc_losses : gaussianpolicy 면, -log_prob, deterministic 이면 MSE
+            return torch.mean(exp_adv * bc_losses)
 
-        if isinstance(policy_out, torch.distributions.Distribution):
-            bc_losses = -policy_out.log_prob(actions)
-        elif torch.is_tensor(policy_out):
-            assert policy_out.shape == actions.shape
-            bc_losses = torch.sum((policy_out - actions)**2, dim=1)
-        else:
-            raise NotImplementedError
-        policy_loss = torch.mean(exp_adv * bc_losses)
-        self.policy_optimizer.zero_grad(set_to_none=True)
-        policy_loss.backward()
-        self.policy_optimizer.step()
+        policy_loss, _ = self._two_step(self.policy_optimizer, policy_loss_fn)
         self.policy_lr_schedule.step()
-        reward_mean = rewards.mean().item()
 
         return {
-            'v_loss' : v_loss.item(),
-            'q_loss' : q_loss.item(),
-            'policy_loss' : policy_loss.item(), 
-            'reward_mean' : reward_mean
-
+            "v_loss":      v_loss.item(),
+            "q_loss":      q_loss.item(),
+            "policy_loss": policy_loss.item(),
+            "reward_mean": rewards.mean().item(),
         }

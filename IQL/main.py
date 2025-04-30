@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from tqdm import trange
 import wandb
+from src.sam import SAM  # or sam import SAM, if sam.py is in root
+    # 또는 sam.py 직접 복사
 
 from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
@@ -25,26 +27,20 @@ def get_env_and_dataset(log, npz_path, max_episode_steps = None):
         log(f"  {k:17s} shape={tuple(v.shape)} dtype={v.dtype}")
     return None, dataset 
 
-# def get_env_and_dataset(log, dataset_path, simmul):
-#     if simmul:
-#         from tclab import setup
-#         lab = setup(connected=False)
-#         env = lab(synced=False)
-#     else:
-#         env = tclab.TCLab()
-#     env.Q1(0)
-#     env.Q2(0)
+def build_optimizer_factory(args):
+    if args.sam:
+        # SAM( params, base_optimizer, **base_opt_kwargs, rho=... )
+        return lambda params: SAM(params,
+                                  torch.optim.Adam,
+                                  lr=args.learning_rate,
+                                  betas=(0.9, 0.999),
+                                  rho=args.sam_rho)
+    else:
+        return lambda params: torch.optim.Adam(params,
+                                               lr=args.learning_rate)
 
-#     dataset_np = np.load(dataset_path)
-#     dataset = {k: torchify(v) for k, v in dataset_np.items()}
 
-#     reward_scale = 20
-#     r = dataset['rewards']
-#     dataset['rewards'] = normalize_reward(r,reward_scale=reward_scale)
 
-#     log(f"✅ reward normalized [-1, 1] and scaled ×{reward_scale}")
-#     log(f"Loaded dataset with {len(dataset['observations'])} transitions from {dataset_path}")
-#     return env, dataset
 def main(args):
     torch.set_num_threads(1)
     wandb.init(
@@ -94,14 +90,18 @@ def main(args):
 
     # def eval_policy  안에 실제/simul class 로 가져오기 
 
-    
+    optimizer_factory = build_optimizer_factory(args)
 
         
     iql = ImplicitQLearning(
-        qf=TwinQ(obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden),
-        vf=ValueFunction(obs_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden),
+        qf=TwinQ(obs_dim, act_dim,
+                hidden_dim=args.hidden_dim,
+                n_hidden=args.n_hidden),
+        vf=ValueFunction(obs_dim,
+                        hidden_dim=args.hidden_dim,
+                        n_hidden=args.n_hidden),
         policy=policy,
-        optimizer_factory=lambda params: torch.optim.Adam(params, lr=args.learning_rate),
+        optimizer_factory=optimizer_factory,
         max_steps=args.n_steps,
         tau=args.tau,
         beta=args.beta,
@@ -222,14 +222,14 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('--env-name', default='tclab-mpc-iql')
-    parser.add_argument('--log-dir', default='./cum_reward')
+    parser.add_argument('--log-dir', default='./sam')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--hidden-dim', type=int, default=512)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--n-steps', type=int, default=10**5 *3) # 50만 step 만 돌아도 충분히 수렴
     parser.add_argument('--batch-size', type=int, default=256)
-    parser.add_argument('--learning-rate', type=float, default=3e-4)
+    parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--tau', type=float, default=0.9)
     parser.add_argument('--beta', type=float, default=3.0)
@@ -239,8 +239,13 @@ if __name__ == '__main__':
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
-    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\next_reward_scaler.npz")
+    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\first_reward.npz")
     parser.add_argument('--scaler')
+    # main.py 맨 위 argparse 부분
+    parser.add_argument("--sam", action="store_true",
+                        help="Sharpness-Aware Minimization 사용 여부")
+    parser.add_argument("--sam-rho", type=float, default=0.05,
+                        help="SAM perturbation half-width (ρ)")
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
     #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
     #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
@@ -250,6 +255,8 @@ if __name__ == '__main__':
     # "C:/Users/Developer/TCLab/Data/next_reward_scaler.pkl" 
     # first_reward
     # "C:/Users/Developer/TCLab/Data/first_reward.pkl" 
+    # main.py 맨 위 argparse 부분
+
 
 
 """
