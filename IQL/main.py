@@ -222,7 +222,7 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('--env-name', default='tclab-mpc-iql')
-    parser.add_argument('--log-dir', default='./runs')
+    parser.add_argument('--log-dir', default='./cum_reward')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--hidden-dim', type=int, default=256)
@@ -239,14 +239,17 @@ if __name__ == '__main__':
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
-    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\mpc_reward_weight.npz")
-    
-    #parser.add_argument('--npz-path', default='C:\\Users\Developer\\TCLab\\Data\\mpc_dataset.npz')
-
-    
+    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\next_reward_scaler.npz")
+#    parser.add_argument('--scaler')
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
-    
+    #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
+    #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
+    #  C:\\Users\\Developer\\TCLab\\Data\\next_reward_scaler.pkl
     main(parser.parse_args())
+    #"C:/Users/Developer/TCLab/Data/next_reward_timeerror_scaler.pkl"
+    # "C:/Users/Developer/TCLab/Data/next_reward_scaler.pkl" 
+    # first_reward
+    # "C:/Users/Developer/TCLab/Data/first_reward.pkl" 
 
 
 """

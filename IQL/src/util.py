@@ -113,6 +113,7 @@ def sample_batch(dataset, batch_size):
 
 
 def evaluate_policy_sim(policy, args):
+
     return simulator_policy(
         policy=policy,
         total_time_sec=args.max_episode_steps,

@@ -36,13 +36,33 @@ EPS = 1e-6
 REWARD_MIN = -26.0 
 REWARD_MAX = -6.0  
 
-E1, E2 = 1.0, 2.0 
+E1, E2 = 1.0,1.0
 
-def compute_reward(acc_error1, acc_error2):
-    #reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
-    reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
 
-    return reward
+from sklearn.preprocessing import StandardScaler
+import joblib
+# ★ 학습 시 사용한 scaler를 따로 저장하거나, 같은 방식으로 다시 fit 해야 일관성 유지 가능
+reward_scaler = StandardScaler()
+#reward_scaler = joblib.load("C:\\Users\\Developer\\TCLab\\Data\\reward_scaler.pkl")
+#reward_scaler = joblib.load("C:\\Users\\Developer\\TCLab\Data\\reward_scaler_time.pkl")
+
+def compute_reward(e1, e2):
+    return -math.hypot(e1, e2)
+def compute_reward(acc_error1, acc_error2, reward_scaler):
+    raw_reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
+    #reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
+    scaled = reward_scaler.transform([[raw_reward]])[0][0]
+    return scaled
+
+
+# def compute_reward(acc_error1, acc_error2, time_sec: float, reward_scaler):
+
+#     alpha = 0.05
+#     raw_reward = - np.sqrt(acc_error1**2 + acc_error2**2) - alpha * time_sec
+
+#     # 스케일러 적용 (주의: scaler는 학습된 상태여야 함)
+#     scaled = reward_scaler.transform([[raw_reward]])[0][0]
+#     return scaled
 
 def generate_random_tsp(total_time_sec : int = 1200,                   
                         dt: float          = 5.0,      # sample / control interval
@@ -99,13 +119,15 @@ def simulator_policy(
     run_dir = Path(log_root) / f"sim_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-
     # --- 시뮬레이터 환경 생성 ---
     lab = setup(connected=False)
     env = lab(synced=False)
     if hasattr(env, "T_amb"):
         env.T_amb = ambient  # ambient 설정 지원 시
     env.Q1(0); env.Q2(0)
+
+    env._T1 = 29.0
+    env._T2 = 29.0
 
     # --- set‑point 시퀀스 ---
     Tsp1 = generate_random_tsp(total_time_sec, dt)
@@ -119,11 +141,6 @@ def simulator_policy(
     total_ret = e1 = e2 = over = under = 0.0
     policy.eval()
 
-    ### 추가 된 내용들 => 누적 에러 사용 
-    acc_error1 = 0.0 
-    acc_error2 = 0.0
-    ###
-    
     for k in trange(steps, desc="sim"):  # 1 s per step
         env.update(t=k * dt)
         T1[k] = env.T1   
@@ -137,14 +154,11 @@ def simulator_policy(
         env.Q1(Q1[k])
         env.Q2(Q2[k])
 
-
         # 현재 에러계산 
         err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
 
-        # 누적 에러 업데이트 
-        acc_error1 += abs(err1)
-        acc_error2 += abs(err2)
-
+        # time_sec = k * dt
+        # reward = compute_reward(err1, err2, time_sec, reward_scaler)
         reward = compute_reward(err1, err2)
         total_ret += reward
         
