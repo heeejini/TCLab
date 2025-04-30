@@ -46,8 +46,8 @@ reward_scaler = StandardScaler()
 #reward_scaler = joblib.load("C:\\Users\\Developer\\TCLab\\Data\\reward_scaler.pkl")
 #reward_scaler = joblib.load("C:\\Users\\Developer\\TCLab\Data\\reward_scaler_time.pkl")
 
-def compute_reward(e1, e2):
-    return -math.hypot(e1, e2)
+# def compute_reward(e1, e2):
+#     return -math.hypot(e1, e2)
 def compute_reward(acc_error1, acc_error2, reward_scaler):
     raw_reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
     #reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
@@ -110,7 +110,8 @@ def simulator_policy(
     log_root: str | Path = "./eval_sim_logs",
     seed: int = 0,
     ambient: float = 29.0, # start_temp 
-    deterministic: bool = True
+    deterministic: bool = True, 
+    scaler : str| Path = ''
 ):
     from .util import torchify, set_seed
     steps = int(total_time_sec/dt)
@@ -118,6 +119,10 @@ def simulator_policy(
     set_seed(seed)
     run_dir = Path(log_root) / f"sim_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- 스케일러 설정
+    print(f"scaler 경로 : {scaler}")
+    reward_scaler = joblib.load(scaler)
 
     # --- 시뮬레이터 환경 생성 ---
     lab = setup(connected=False)
@@ -159,7 +164,7 @@ def simulator_policy(
 
         # time_sec = k * dt
         # reward = compute_reward(err1, err2, time_sec, reward_scaler)
-        reward = compute_reward(err1, err2)
+        reward = compute_reward(err1, err2, reward_scaler)
         total_ret += reward
         
         e1 += abs(err1);  e2 += abs(err2)

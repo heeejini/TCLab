@@ -121,7 +121,8 @@ def evaluate_policy_sim(policy, args):
         log_root="./eval_sim_logs",
         seed=args.seed,
         ambient=29.0,
-        deterministic=args.deterministic_policy
+        deterministic=args.deterministic_policy,
+        scaler=args.scaler 
     )
 
 def evaluate_policy_tclab(policy, args):
