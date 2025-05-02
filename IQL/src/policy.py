@@ -34,6 +34,25 @@ class GaussianPolicy(nn.Module):
             dist = self(obs)
             # exploration 시에는 dist.sample() , evaluation 시에는 dist.mean() 사용 
             return dist.mean if deterministic else dist.sample()
+        
+    #def online_act (self, obs, deterministic=False, enable_grad = False, )
+            
+    def online_act(self, obs, deterministic=False, enable_grad=False, eps=0.05):
+        
+        with torch.set_grad_enabled(enable_grad):
+            dist = self(obs)
+            if deterministic:
+                action = dist.mean
+            else:
+                if torch.rand(1).item() < eps:
+                    print("----random----")
+                    # 완전한 랜덤 액션
+                    action = torch.FloatTensor(2).uniform_(0, 100).to(obs.device)
+                   # print(action)
+                else:
+                    print("no random")
+                    action = dist.sample()
+        return torch.clamp(action, 0.0, 100.0)
 
 
 class DeterministicPolicy(nn.Module):

@@ -30,7 +30,7 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
     for k in trange(steps, desc="rollout"):
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
-            action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
+            action = policy.online_act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
 
         Q1 = float(np.clip(action[0], 0, 100))
         Q2 = float(np.clip(action[1], 0, 100))
@@ -106,6 +106,11 @@ def online_finetune(args):
         metrics.update({"episode": episode})
         metrics.update(loss_dict)
 
+        try:
+            total_error = metrics["E1"] + metrics["E2"] + metrics["Over"] + metrics["Under"]
+            metrics["total_error"] = total_error
+        except KeyError:
+            print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Usnder 누락)")
         log.row(metrics)
         wandb.log(metrics)
 
@@ -118,22 +123,26 @@ def online_finetune(args):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
+    # sam optimizer / 512 hidden dim 
+    parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\04-30-25_18.03.59_kers\\best.pt")
     parser.add_argument('--scaler', default="C:\\Users\\Developer\\TCLab\\Data\\first_reward.pkl")
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
     parser.add_argument('--log-dir', default="./logs_online")
     parser.add_argument('--max-episode-steps', type=int, default=1200)
     parser.add_argument('--sample_interval', type=float, default=5.0)
-    parser.add_argument('--n-steps', type=int, default=500) # 50만 step 만 돌아도 충분히 수렴
-    parser.add_argument('--n-episodes', type=int, default=250)
-    parser.add_argument('--update_per_episode', type=int, default=1)
+    #n_episodes=100, update_per_episode=60
+    # 1000
+    parser.add_argument('--n-episodes', type=int, default=500)
+    parser.add_argument('--update_per_episode', type=int, default=15)
+    parser.add_argument('--n-steps', type=int, default=10000)
+
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--learning-rate', type=float, default=3e-4)
-    parser.add_argument('--hidden-dim', type=int, default=256)
+    parser.add_argument('--hidden-dim', type=int, default=512)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--tau', type=float, default=0.7)
+    parser.add_argument('--tau', type=float, default=0.8)
     parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--seed', type=int, default=0)
