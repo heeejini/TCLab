@@ -9,7 +9,19 @@ from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
 from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim
+from src.sam import SAM 
 
+def build_optimizer_factory(args):
+    if args.sam:
+        # SAM( params, base_optimizer, **base_opt_kwargs, rho=... )
+        return lambda params: SAM(params,
+                                  torch.optim.Adam,
+                                  lr=args.learning_rate,
+                                  betas=(0.9, 0.999),
+                                  rho=args.sam_rho)
+    else:
+        return lambda params: torch.optim.Adam(params,
+                                               lr=args.learning_rate)
 
 def rollout_simulator(policy, buffer, reward_scaler, args):
     from src.eval_policy import generate_random_tsp
@@ -55,11 +67,14 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         T1, T2 = next_T1, next_T2
 
 
+
+
 def online_finetune(args):
     torch.set_num_threads(1)
     wandb.init(project="tclab-project", name=args.exp_name, config=vars(args))
     log = Log(Path(args.log_dir)/args.env_name, vars(args))
     set_seed(args.seed)
+    optimizer_factory = build_optimizer_factory(args)
 
     obs_dim, act_dim = 4, 2
     if args.deterministic_policy:
@@ -71,7 +86,7 @@ def online_finetune(args):
     vf = ValueFunction(obs_dim, args.hidden_dim, args.n_hidden)
     iql = ImplicitQLearning(
         qf=qf, vf=vf, policy=policy,
-        optimizer_factory=lambda p: torch.optim.Adam(p, lr=args.learning_rate),
+        optimizer_factory=optimizer_factory,
         max_steps=args.n_steps, tau=args.tau, beta=args.beta,
         discount=args.discount, alpha=args.alpha)
 
@@ -133,12 +148,12 @@ if __name__ == "__main__":
     parser.add_argument('--sample_interval', type=float, default=5.0)
     #n_episodes=100, update_per_episode=60
     # 1000
-    parser.add_argument('--n-episodes', type=int, default=500)
-    parser.add_argument('--update_per_episode', type=int, default=15)
-    parser.add_argument('--n-steps', type=int, default=10000)
+    parser.add_argument('--n-episodes', type=int, default=250)
+    parser.add_argument('--update_per_episode', type=int, default=30)
+    parser.add_argument('--n-steps', type=int, default=10000) 
 
-    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--learning-rate', type=float, default=3e-4)
+    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--hidden-dim', type=int, default=512)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--discount', type=float, default=0.99)
@@ -148,7 +163,12 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--ambient', type=float, default=29.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
-    
+    # argparse 영역 맨 아래쯤
+    parser.add_argument("--sam", action="store_true",
+                        help="SAM(Sharpness‑Aware Minimization) 사용 여부")
+    parser.add_argument("--sam-rho", type=float, default=0.05,
+                        help="SAM perturbation 반경 ρ")
+
     args = parser.parse_args()
 
     online_finetune(args)

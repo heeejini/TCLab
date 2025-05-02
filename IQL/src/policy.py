@@ -36,23 +36,53 @@ class GaussianPolicy(nn.Module):
             return dist.mean if deterministic else dist.sample()
         
     #def online_act (self, obs, deterministic=False, enable_grad = False, )
-            
-    def online_act(self, obs, deterministic=False, enable_grad=False, eps=0.05):
-        
+    def online_act(self, obs, deterministic=False, enable_grad=False, bias_prob=0.2):
+        """
+        강화학습 온라인 실험에서 전략적 탐험을 위한 행동 선택 함수
+
+        Parameters:
+            obs : torch.Tensor (길이 4)
+                입력 상태 벡터 [T1, T2, TSP1, TSP2]
+            deterministic : bool
+                True일 경우 평균만 사용
+            enable_grad : bool
+                그라디언트 활성화 여부
+            bias_prob : float
+                규칙 기반 행동 선택 확률 (0.0 ~ 1.0)
+
+        Returns:
+            action : torch.Tensor
+                선택된 행동 벡터 [Q1, Q2] ∈ [0, 100]
+        """
+        # [T1[k], T2[k], Tsp1[k], Tsp2[k]],
         with torch.set_grad_enabled(enable_grad):
             dist = self(obs)
+
             if deterministic:
                 action = dist.mean
+                print("deterministic mode")
+                return torch.clamp(action, 0.0, 100.0)
+            
+            if torch.rand(1).item() < bias_prob:
+                print("[Exploration: TSP-T proportional]")
+
+                obs = obs.detach()
+                delta1 = obs[2] - obs[0]  # TSP1 - T1
+                delta2 = obs[3] - obs[1]  # TSP2 - T2
+
+                # 스케일링 factor 조정
+                k = 3.0  # (튜닝 가능)
+
+                a1 = 50.0 + k * delta1
+                a2 = 50.0 + k * delta2
+
+                action = torch.tensor([a1, a2], device=obs.device)
+
             else:
-                if torch.rand(1).item() < eps:
-                    print("----random----")
-                    # 완전한 랜덤 액션
-                    action = torch.FloatTensor(2).uniform_(0, 100).to(obs.device)
-                   # print(action)
-                else:
-                    print("no random")
-                    action = dist.sample()
-        return torch.clamp(action, 0.0, 100.0)
+                print("[Exploitation: Learned sample]")
+                action = dist.sample()
+
+            return torch.clamp(action, 0.0, 100.0)
 
 
 class DeterministicPolicy(nn.Module):

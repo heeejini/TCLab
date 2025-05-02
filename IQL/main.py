@@ -4,8 +4,7 @@ import numpy as np
 import torch
 from tqdm import trange
 import wandb
-from src.sam import SAM  # or sam import SAM, if sam.py is in root
-    # 또는 sam.py 직접 복사
+from src.sam import SAM 
 
 from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
@@ -225,11 +224,11 @@ if __name__ == '__main__':
     parser.add_argument('--log-dir', default='./sam')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--hidden-dim', type=int, default=512)
+    parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--n-steps', type=int, default=10**5 *3) # 50만 step 만 돌아도 충분히 수렴
     parser.add_argument('--batch-size', type=int, default=256)
-    parser.add_argument('--learning-rate', type=float, default=1e-3)
+    parser.add_argument('--learning-rate', type=float, default=1e-4)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--tau', type=float, default=0.9)
     parser.add_argument('--beta', type=float, default=3.0)
@@ -244,7 +243,7 @@ if __name__ == '__main__':
     # main.py 맨 위 argparse 부분
     parser.add_argument("--sam", action="store_true",
                         help="Sharpness-Aware Minimization 사용 여부")
-    parser.add_argument("--sam-rho", type=float, default=0.05,
+    parser.add_argument("--sam-rho", type=float, default=0.03,
                         help="SAM perturbation half-width (ρ)")
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
     #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
