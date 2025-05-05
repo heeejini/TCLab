@@ -121,6 +121,12 @@ def main(args):
     best_policy_loss = float('inf')
 
     best_step = -1
+    # early stopping 파라미터 
+    patience        = 6         
+    min_delta_err   = 0.5         # error 가 0.5° 이하로만 개선되면 무시
+    min_delta_ret   = 1.0         # return 이 1.0 이상 개선돼야 의미
+    no_improve_cnt  = 0           # 연속 미개선 카운터
+    stop_step       = None        # 조기 종료 시점 기록 
 
     for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
@@ -146,6 +152,9 @@ def main(args):
             full_log = loss_dict.copy()
             full_log.update(metrics)
 
+            prev_best_err = best_total_error
+            prev_best_ret = best_total_return
+
             # float 처리
             for k, v in full_log.items():
                 if isinstance(v, torch.Tensor):
@@ -162,38 +171,38 @@ def main(args):
                 else:
                     print(f"  {k}: {v}")
 
-            # === Best Model 저장하기 ===
+            # total error 계산 
             try:
-                total_error = (full_log['E1'] + full_log['E2'] + full_log['Over'] + full_log['Under'])
-                full_log['total_error'] = total_error  # 📝 full_log에 기록 추가
-
-                if total_error < best_total_error:
-                    best_total_error = total_error
-                    best_step = step + 1
-                    torch.save(iql.state_dict(), log.dir/'best.pt')
-                    print(f"✅ [Step {step+1}] Best model (Total Error) saved!")
+                total_error = full_log['E1'] + full_log['E2'] + full_log['Over'] + full_log['Under']
             except KeyError:
-                print("⚠️ Warning: E1, E2, Over, Under 값이 metrics에 없습니다.")
+                total_error = np.inf                       # 값이 없으면 무한대
+            full_log['total_error'] = total_error
 
-            # Best total_return (클수록 좋음)
+            # Best total_return 
+            if total_error < best_total_error:
+                best_total_error = total_error
+                best_step = step + 1
+                torch.save(iql.state_dict(), log.dir / 'best.pt')
+                print(f"✅ [Step {step+1}] Best model saved!")
+
             if full_log.get('total_return', -1e9) > best_total_return:
                 best_total_return = full_log['total_return']
                 torch.save(iql.state_dict(), log.dir/'best_return.pt')
                 print(f"✅ [Step {step+1}] Best model (Total Return) saved!")
 
-            # Best q_loss (작을수록 좋음)
+            # Best q_loss 
             if full_log.get('q_loss', 1e9) < best_q_loss:
                 best_q_loss = full_log['q_loss']
                 torch.save(iql.state_dict(), log.dir/'best_q.pt')
                 print(f"✅ [Step {step+1}] Best model (Q Loss) saved!")
 
-            # Best v_loss (작을수록 좋음)
+            # Best v_loss 
             if full_log.get('v_loss', 1e9) < best_v_loss:
                 best_v_loss = full_log['v_loss']
                 torch.save(iql.state_dict(), log.dir/'best_v.pt')
                 print(f"✅ [Step {step+1}] Best model (V Loss) saved!")
 
-            # Best policy_loss (작을수록 좋음)
+            # Best policy_loss 
             if full_log.get('policy_loss', 1e9) < best_policy_loss:
                 best_policy_loss = full_log['policy_loss']
                 torch.save(iql.state_dict(), log.dir/'best_policy.pt')
@@ -202,10 +211,31 @@ def main(args):
             log.row(full_log)
             wandb.log(full_log)
 
-    # 학습 끝난 후 최종 모델 저장
-    torch.save(iql.state_dict(), log.dir/'final.pt')
+            # early stopping 체크 
+            improved = False
 
-    # Best 결과 기록
+            if (prev_best_err - total_error) > min_delta_err:
+                improved = True
+                best_total_error = total_error   
+                no_improve_cnt = 0
+            elif (full_log['total_return'] - prev_best_ret) > min_delta_ret:
+                improved = True
+                best_total_return = full_log['total_return'] 
+                no_improve_cnt = 0
+            if not improved:
+                no_improve_cnt += 1
+                print(f"Early‑stop patience {no_improve_cnt}/{patience}")
+
+            if no_improve_cnt >= patience:
+                stop_step = step + 1
+                print(f"\nEarly‑Stopping triggered at step {stop_step} !")
+                break
+
+    torch.save(iql.state_dict(), log.dir/'final.pt')
+    if stop_step is not None:
+        with open(log.dir / 'early_stop.txt', 'w') as f:
+            f.write(f"Stopped early at step {stop_step} (no improvement for {patience} evals)\n")
+
     with open(log.dir/'best_info.txt', 'w') as f:
         f.write(f"Best Step (Total Error 기준): {best_step}\n")
         f.write(f"Best Total Error: {best_total_error:.3f}\n")
@@ -216,7 +246,6 @@ def main(args):
 
     wandb.finish()
     log.close()
-
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
@@ -228,9 +257,9 @@ if __name__ == '__main__':
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--n-steps', type=int, default=10**5 *3) # 50만 step 만 돌아도 충분히 수렴
     parser.add_argument('--batch-size', type=int, default=256)
-    parser.add_argument('--learning-rate', type=float, default=1e-4)
+    parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--alpha', type=float, default=0.005)
-    parser.add_argument('--tau', type=float, default=0.9)
+    parser.add_argument('--tau', type=float, default=0.8)
     parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
     parser.add_argument('--eval-period', type=int, default=5000)
@@ -238,7 +267,8 @@ if __name__ == '__main__':
     parser.add_argument('--max-episode-steps', type=int, default=1200)  # 20분 
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
-    parser.add_argument('--npz-path', default="C:\\Users\\Developer\\TCLab\\Data\\MPC\\first_reward.npz")
+    #C:\Users\User\TCLab\Data\MPC\first_reward.npz
+    parser.add_argument('--npz-path', default="C:\\Users\\User\\TCLab\\dataset\\outputs\\first_reward.npz")
     parser.add_argument('--scaler')
     # main.py 맨 위 argparse 부분
     parser.add_argument("--sam", action="store_true",
