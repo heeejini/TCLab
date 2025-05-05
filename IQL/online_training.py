@@ -53,7 +53,14 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         env.Q1(Q1); env.Q2(Q2)
 
         next_T1, next_T2 = env.T1, env.T2
-        next_obs = np.array([next_T1, next_T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
+        if k == steps - 1:
+            TSP1_next = Tsp1[k]
+            TSP2_next = Tsp2[k]
+        else:
+            TSP1_next = Tsp1[k + 1]
+            TSP2_next = Tsp2[k + 1]
+
+        next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next], dtype=np.float32)
 
         err1 = Tsp1[k] - next_T1
         err2 = Tsp2[k] - next_T2
