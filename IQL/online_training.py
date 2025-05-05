@@ -4,6 +4,7 @@ from pathlib import Path
 from tqdm import trange
 import joblib
 import wandb
+import copy 
 
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
@@ -40,6 +41,9 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
     policy.eval()
 
     for k in trange(steps, desc="rollout"):
+        ### 
+        env.update(t=k*args.sample_interval)
+        #### 
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
             action = policy.online_act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
@@ -65,8 +69,6 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         buffer['terminals'].append(done)
 
         T1, T2 = next_T1, next_T2
-
-
 
 
 def online_finetune(args):
@@ -105,7 +107,10 @@ def online_finetune(args):
         "terminals": []
     }
 
-    for episode in range(args.n_episodes):
+    best_total_error = float("inf")
+    best_state = None
+
+        for episode in range(args.n_episodes):
         rollout_simulator(iql.policy, buffer, reward_scaler, args)
 
         dataset = {
@@ -121,18 +126,37 @@ def online_finetune(args):
         metrics.update({"episode": episode})
         metrics.update(loss_dict)
 
+        # total_error 계산
         try:
-            total_error = metrics["E1"] + metrics["E2"] + metrics["Over"] + metrics["Under"]
+            total_error = (
+                metrics["E1"] + metrics["E2"] +
+                metrics["Over"] + metrics["Under"]
+            )
             metrics["total_error"] = total_error
         except KeyError:
-            print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Usnder 누락)")
+            print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Under 누락)")
+            total_error = None
+
+        if total_error is not None:
+            if total_error < best_total_error:
+                best_total_error = total_error
+                best_state = copy.deepcopy(iql.state_dict())
+                print(f"[EP {episode}] 성능 개선 total_error={total_error:.4f}")
+            else:
+                if best_state is not None:
+                    iql.load_state_dict(best_state)
+                    print(f"[EP {episode}] 성능 악화. 이전 best(total_error={best_total_error:.4f})로 롤백")
+
         log.row(metrics)
         wandb.log(metrics)
 
-    torch.save(iql.state_dict(), log.dir/'final_online.pt')
-    print(f"Final fine-tuned model saved to: {log.dir/'final_online.pt'}")
+    if best_state is not None:
+        iql.load_state_dict(best_state)
+    torch.save(iql.state_dict(), log.dir / 'final_online.pt')
+    print(f"최적 파라미터 저장 완료: {log.dir / 'final_online.pt'}")
     wandb.finish()
     log.close()
+
 
 
 if __name__ == "__main__":
