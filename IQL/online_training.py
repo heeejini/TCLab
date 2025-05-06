@@ -46,26 +46,32 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         #### 
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
-            action = policy.online_act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
+            action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
 
         Q1 = float(np.clip(action[0], 0, 100))
         Q2 = float(np.clip(action[1], 0, 100))
         env.Q1(Q1); env.Q2(Q2)
 
         next_T1, next_T2 = env.T1, env.T2
+
         if k == steps - 1:
             TSP1_next = Tsp1[k]
             TSP2_next = Tsp2[k]
+            TSP1_mean = Tsp1[k]
+            TSP2_mean = Tsp2[k]
         else:
             TSP1_next = Tsp1[k + 1]
             TSP2_next = Tsp2[k + 1]
+            TSP1_mean = (Tsp1[k] + Tsp1[k + 1]) / 2
+            TSP2_mean = (Tsp2[k] + Tsp2[k + 1]) / 2
 
         next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next], dtype=np.float32)
 
-        err1 = Tsp1[k] - next_T1
-        err2 = Tsp2[k] - next_T2
+        err1 = TSP1_mean - T1
+        err2 = TSP2_mean - T2
         raw_reward = -np.sqrt(err1**2 + err2**2)
         reward = reward_scaler.transform([[raw_reward]])[0][0]
+
 
         done = (k == steps - 1)
 
@@ -117,7 +123,7 @@ def online_finetune(args):
     best_total_error = float("inf")
     best_state = None
 
-        for episode in range(args.n_episodes):
+    for episode in range(args.n_episodes):
         rollout_simulator(iql.policy, buffer, reward_scaler, args)
 
         dataset = {
@@ -170,7 +176,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     # sam optimizer / 512 hidden dim 
-    parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\04-30-25_18.03.59_kers\\best.pt")
+    parser.add_argument('--pt-path',  default="C:\\Users\\User\\TCLab\\IQL\\sam\\tclab-mpc-iql\\05-05-25_12.38.17_hrpy\\best.pt")
     parser.add_argument('--scaler', default="C:\\Users\\Developer\\TCLab\\Data\\first_reward.pkl")
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
@@ -179,17 +185,17 @@ if __name__ == "__main__":
     parser.add_argument('--sample_interval', type=float, default=5.0)
     #n_episodes=100, update_per_episode=60
     # 1000
-    parser.add_argument('--n-episodes', type=int, default=250)
-    parser.add_argument('--update_per_episode', type=int, default=30)
-    parser.add_argument('--n-steps', type=int, default=10000) 
+    parser.add_argument('--n-episodes', type=int, default=2000)
+    parser.add_argument('--update_per_episode', type=int, default=240)
+    parser.add_argument('--n-steps', type=int, default=485000) 
 
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--batch-size', type=int, default=256)
-    parser.add_argument('--hidden-dim', type=int, default=512)
+    parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--tau', type=float, default=0.8)
-    parser.add_argument('--beta', type=float, default=3.0)
+    parser.add_argument('--tau', type=float, default=0.9)
+    parser.add_argument('--beta', type=float, default=5.0)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--ambient', type=float, default=29.0)
