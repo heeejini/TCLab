@@ -99,9 +99,9 @@ def generate_random_tsp(total_time_sec : int = 1200,
     print("-----------------------------------------------------------\n")
     return tsp
 
-# ──────────────────────────────────────────────────────────────────────
+# ────────────────────────────────
 # 1) 시뮬레이터 평가 함수
-# ──────────────────────────────────────────────────────────────────────
+# ────────────────────────────────
 
 def simulator_policy(
     policy,
@@ -191,36 +191,49 @@ def simulator_policy(
     return dict(T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2, Q1=Q1, Q2=Q2,
                 total_return=total_ret, E1=e1, E2=e2, Over=over, Under=under)
 
-# ──────────────────────────────────────────────────────────────────────
+# ────────────────────────────────
 # 2) 실제 장비(TCLab) 평가 함수
-# ──────────────────────────────────────────────────────────────────────
-
+# ────────────────────────────────
 def tclab_policy(
     policy,
     total_time_sec: int = 1200,
     dt: float = 5.0,
     log_root: str | Path = "./eval_real_logs",
     seed: int = 0,
+    ambient: float = 29.0,     
     deterministic: bool = True,
+    scaler: str | Path = ''
 ):
-    """실제 USB‑TCLab 장치에서 정책 평가"""
+    """
+    실제 USB‑TCLab 장치에서 정책 평가
+    simulator_policy와 동일한 로깅/리워드/타이밍 규칙을 적용한다.
+    """
     from .util import torchify, set_seed
-    steps = int(total_time_sec / dt)
+    steps   = int(total_time_sec / dt)
     set_seed(seed)
+
     run_dir = Path(log_root) / f"real_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── 리워드 스케일러 
+    print(f"scaler 경로 : {scaler}")
+    reward_scaler = joblib.load(scaler) if scaler else None   # 빈 문자열이면 None
+
+    # ── TCLab 연결 
     with TCLab() as arduino:
         arduino.LED(100)
         arduino.Q1(0); arduino.Q2(0)
-        # 냉각 대기 (옵션)
-        while arduino.T1 > 29 or arduino.T2 > 29:
+
+        # 냉각 기준(ambient)까지 대기
+        while arduino.T1 > ambient or arduino.T2 > ambient:
             time.sleep(10)
 
+        # set‑point 시퀀스
         Tsp1 = generate_random_tsp(total_time_sec, dt)
         Tsp2 = generate_random_tsp(total_time_sec, dt)
 
-        t  = np.arange(steps) * dt 
+        # 버퍼
+        t  = np.arange(steps) * dt
         T1 = np.zeros(steps); T2 = np.zeros(steps)
         Q1 = np.zeros(steps); Q2 = np.zeros(steps)
 
@@ -228,39 +241,62 @@ def tclab_policy(
         policy.eval()
 
         for k in trange(steps, desc="real"):
-            T1[k] = arduino.T1;  T2[k] = arduino.T2
+            loop_start = time.time()
+
+            # ── 센서 읽기 ─────
+            T1[k] = arduino.T1
+            T2[k] = arduino.T2
+
+            # ── 정책 행동 계산 
             obs = np.array([T1[k], T2[k], Tsp1[k], Tsp2[k]], dtype=np.float32)
             with torch.no_grad():
                 act = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
+
             Q1[k] = float(np.clip(act[0], 0, 100))
             Q2[k] = float(np.clip(act[1], 0, 100))
             arduino.Q1(Q1[k]); arduino.Q2(Q2[k])
 
+            # ── 리워드 및 통계 
             err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
-            reward = compute_reward(err1, err2)
+            if reward_scaler is not None:
+                reward = compute_reward(err1, err2, reward_scaler)
+            else:
+                reward = compute_reward(err1, err2)
             total_ret += reward
-            
+
             e1 += abs(err1);  e2 += abs(err2)
             over  += max(0, -err1) + max(0, -err2)
             under += max(0,  err1) + max(0,  err2)
-            time.sleep(1.0)  # 1초 주기
+
+            # ── dt 간격 유지 
+            elapsed = time.time() - loop_start
+            time.sleep(max(0.0, dt - elapsed))
 
         arduino.Q1(0); arduino.Q2(0)
 
-    # CSV & 그래프 저장
     csv_path = run_dir / "rollout.csv"
     with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["time","T1","T2","Q1","Q2","TSP1","TSP2"])
+        w = csv.writer(f)
+        w.writerow(["time","T1","T2","Q1","Q2","TSP1","TSP2"])
         for k in range(steps):
             w.writerow([t[k], T1[k], T2[k], Q1[k], Q2[k], Tsp1[k], Tsp2[k]])
 
-    fig, ax = plt.subplots(2,1,figsize=(10,8))
+    fig, ax = plt.subplots(2, 1, figsize=(10, 8))
     ax[0].plot(t, T1, label="T1"); ax[0].plot(t, Tsp1, "--", label="TSP1")
     ax[0].plot(t, T2, label="T2"); ax[0].plot(t, Tsp2, ":", label="TSP2")
     ax[0].grid(); ax[0].legend(); ax[0].set_ylabel("Temp (°C)")
-    ax[1].plot(t, Q1, label="Q1"); ax[1].plot(t, Q2, label="Q2")
-    ax[1].grid(); ax[1].legend(); ax[1].set_ylabel("Heater (%)"); ax[1].set_xlabel("Time (s)")
-    plt.tight_layout(); plt.savefig(run_dir / "rollout.png"); plt.close()
 
-    return dict(T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2, Q1=Q1, Q2=Q2,
-                total_return=total_ret, E1=e1, E2=e2, Over=over, Under=under)
+    ax[1].plot(t, Q1, label="Q1"); ax[1].plot(t, Q2, label="Q2")
+    ax[1].grid(); ax[1].legend(); ax[1].set_ylabel("Heater (%)")
+    ax[1].set_xlabel("Time (s)")
+
+    plt.tight_layout()
+    plt.savefig(run_dir / "rollout.png")
+    plt.close()
+
+    return dict(
+        T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2,
+        Q1=Q1, Q2=Q2,
+        total_return=total_ret,
+        E1=e1, E2=e2, Over=over, Under=under
+    )

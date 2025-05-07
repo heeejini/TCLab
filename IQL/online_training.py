@@ -9,7 +9,7 @@ import copy
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
-from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim
+from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab
 from src.sam import SAM 
 
 def build_optimizer_factory(args):
@@ -23,6 +23,87 @@ def build_optimizer_factory(args):
     else:
         return lambda params: torch.optim.Adam(params,
                                                lr=args.learning_rate)
+
+
+def rollout_tclab(policy, buffer, reward_scaler, args):
+    """
+    온라인 학습용 데이터를 실제 TCLab 보드에서 수집하여 buffer 에 추가한다.
+    시뮬레이터용 rollout 과 동일하게
+      - 관측 = [T1, T2, TSP1, TSP2]
+      - 행동  = [Q1, Q2]  (0‑100 %)
+      - 리워드 = -sqrt(err1² + err2²)  (optionally scaled)
+    를 기록한다.
+    """
+    import time
+    import numpy as np
+    import joblib
+    from tclab import TCLab
+    from tqdm import trange
+    from src.eval_policy import generate_random_tsp
+    from src.util import torchify
+
+    dt       = args.sample_interval      
+    steps    = int(args.max_episode_steps / dt)
+    ambient  = 29.0             
+    policy.eval()
+
+    # ── set‑point 프로파일 ──────────────────────────────────────
+    Tsp1 = generate_random_tsp(args.max_episode_steps, dt)
+    Tsp2 = generate_random_tsp(args.max_episode_steps, dt)
+
+    # ── 보드 연결 ────────────────────────────────────────────────
+    with TCLab() as arduino:
+        arduino.LED(100)
+        arduino.Q1(0); arduino.Q2(0)
+
+        # (선택) 냉각 대기
+        while arduino.T1 > ambient or arduino.T2 > ambient:
+            time.sleep(10)
+
+        T1, T2 = arduino.T1, arduino.T2  # 초기 센서값
+
+        for k in trange(steps, desc="rollout‑tclab"):
+            loop_start = time.time()
+
+            obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
+            with torch.no_grad():
+                action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
+
+            Q1 = float(np.clip(action[0], 0, 100))
+            Q2 = float(np.clip(action[1], 0, 100))
+            arduino.Q1(Q1); arduino.Q2(Q2)
+
+            time.sleep(dt)                    # dt 초 대기 
+            next_T1, next_T2 = arduino.T1, arduino.T2
+
+            if k == steps - 1:
+                TSP1_next, TSP2_next = Tsp1[k], Tsp2[k]
+                TSP1_mean, TSP2_mean = Tsp1[k], Tsp2[k]
+            else:
+                TSP1_next, TSP2_next = Tsp1[k + 1], Tsp2[k + 1]
+                TSP1_mean = 0.5 * (Tsp1[k] + Tsp1[k + 1])
+                TSP2_mean = 0.5 * (Tsp2[k] + Tsp2[k + 1])
+
+            next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next],
+                                dtype=np.float32)
+
+            err1 = TSP1_mean - T1
+            err2 = TSP2_mean - T2
+            raw_reward = -np.sqrt(err1**2 + err2**2)
+            reward = reward_scaler.transform([[raw_reward]])[0][0]
+
+            done = (k == steps - 1)
+
+            buffer["observations"].append(obs)
+            buffer["actions"].append([Q1, Q2])
+            buffer["next_observations"].append(next_obs)
+            buffer["rewards"].append(reward)
+            buffer["terminals"].append(done)
+
+            T1, T2 = next_T1, next_T2
+
+        arduino.Q1(0); arduino.Q2(0)
+
 
 def rollout_simulator(policy, buffer, reward_scaler, args):
     from src.eval_policy import generate_random_tsp
@@ -124,7 +205,10 @@ def online_finetune(args):
     best_state = None
 
     for episode in range(args.n_episodes):
-        rollout_simulator(iql.policy, buffer, reward_scaler, args)
+        if args.type == "simulator" :
+            rollout_simulator(iql.policy, buffer, reward_scaler, args)
+        elif args.type == "real" : 
+            rollout_tclab(iql.policy, buffer, reward_scaler, args)
 
         dataset = {
             k: torchify(np.array(v, dtype=np.float32))
@@ -135,7 +219,11 @@ def online_finetune(args):
             batch = sample_batch(dataset, args.batch_size)
             loss_dict = iql.update(**batch)
 
-        metrics = evaluate_policy_sim(iql.policy, args)
+        if args.type == "simulator" : 
+            metrics = evaluate_policy_sim(iql.policy, args)
+        elif args.type == "real" :
+            metrics = evaluate_policy_tclab(iql.policy, args)
+
         metrics.update({"episode": episode})
         metrics.update(loss_dict)
 
@@ -205,7 +293,7 @@ if __name__ == "__main__":
                         help="SAM(Sharpness‑Aware Minimization) 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.05,
                         help="SAM perturbation 반경 ρ")
-
+    parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / tclab kit)")
     args = parser.parse_args()
 
     online_finetune(args)
