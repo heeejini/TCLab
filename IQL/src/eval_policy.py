@@ -200,7 +200,7 @@ def tclab_policy(
     dt: float = 5.0,
     log_root: str | Path = "./eval_real_logs",
     seed: int = 0,
-    ambient: float = 29.0,     
+    ambient: float = 29.0,       # 필요 시 센서 목표 냉각 기준
     deterministic: bool = True,
     scaler: str | Path = ''
 ):
@@ -258,10 +258,11 @@ def tclab_policy(
 
             # ── 리워드 및 통계 
             err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
-            if reward_scaler is not None:
-                reward = compute_reward(err1, err2, reward_scaler)
-            else:
-                reward = compute_reward(err1, err2)
+            # if reward_scaler is not None:
+            #     reward = compute_reward(err1, err2, reward_scaler)
+            # else:
+            #     reward = compute_reward(err1, err2)
+            reward = compute_reward(err1, err2, reward_scaler)
             total_ret += reward
 
             e1 += abs(err1);  e2 += abs(err2)

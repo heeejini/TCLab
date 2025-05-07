@@ -29,60 +29,120 @@ class GaussianPolicy(nn.Module):
         # else:
         #     return MultivariateNormal(mean, scale_tril=scale_tril)
 
-    def act(self, obs, deterministic=False, enable_grad=False):
+    # def act(self, obs, deterministic=False, enable_grad=False):
+    #     with torch.set_grad_enabled(enable_grad):
+    #         dist = self(obs)
+    #         # exploration 시에는 dist.sample() , evaluation 시에는 dist.mean() 사용 
+    #         return dist.mean if deterministic else dist.sample()
+
+# 안전 범위 내 탐색 
+    def act(
+        self,
+        obs: torch.Tensor,
+        deterministic: bool = False,
+        enable_grad: bool = False,
+        err_thr: float = 3.0,        # |Tsp−T| ≤ err_thr 일 때만 노이즈 추가
+        noise_std: float = 1.0       # 가우시안 노이즈 표준편차 (PWM %)
+    ):
+        """
+        1 + 4 탐색 전략:
+        - 큰 오차(|Tsp - T| > err_thr) → 학습된 policy의 평균(mean)만 사용
+        - 작은 오차(|Tsp - T| ≤ err_thr) → mean + N(0, noise_std²) 로 탐색
+        """
         with torch.set_grad_enabled(enable_grad):
             dist = self(obs)
-            # exploration 시에는 dist.sample() , evaluation 시에는 dist.mean() 사용 
-            return dist.mean if deterministic else dist.sample()
-        
-    #def online_act (self, obs, deterministic=False, enable_grad = False, )
-    def online_act(self, obs, deterministic=False, enable_grad=False, bias_prob=0.2):
-        """
-        강화학습 온라인 실험에서 전략적 탐험을 위한 행동 선택 함수
-
-        Parameters:
-            obs : torch.Tensor (길이 4)
-                입력 상태 벡터 [T1, T2, TSP1, TSP2]
-            deterministic : bool
-                True일 경우 평균만 사용
-            enable_grad : bool
-                그라디언트 활성화 여부
-            bias_prob : float
-                규칙 기반 행동 선택 확률 (0.0 ~ 1.0)
-
-        Returns:
-            action : torch.Tensor
-                선택된 행동 벡터 [Q1, Q2] ∈ [0, 100]
-        """
-        # [T1[k], T2[k], Tsp1[k], Tsp2[k]],
-        with torch.set_grad_enabled(enable_grad):
-            dist = self(obs)
+            mean_action = dist.mean                      # [Q1_mean, Q2_mean]
 
             if deterministic:
-                action = dist.mean
-                print("deterministic mode")
-                return torch.clamp(action, 0.0, 100.0)
-            
-            if torch.rand(1).item() < bias_prob:
-                print("[Exploration: TSP-T proportional]")
+                # 평가 모드: 항상 평균
+                return torch.clamp(mean_action, 0.0, 100.0)
 
-                obs = obs.detach()
-                delta1 = obs[2] - obs[0]  # TSP1 - T1
-                delta2 = obs[3] - obs[1]  # TSP2 - T2
+            # ── 현재 오차 계산 ───────────────────────────────────────
+            delta1 = obs[2] - obs[0]   # TSP1 - T1
+            delta2 = obs[3] - obs[1]   # TSP2 - T2
 
-                # 스케일링 factor 조정
-                k = 3.0  # (튜닝 가능)
+            in_safe_region = (
+                torch.abs(delta1) <= err_thr and
+                torch.abs(delta2) <= err_thr
+            )
 
-                a1 = 50.0 + k * delta1
-                a2 = 50.0 + k * delta2
-
-                action = torch.tensor([a1, a2], device=obs.device)
-
+            if in_safe_region:
+                # 🌱 안전 영역 → 가우시안 노이즈 탐색
+                noise = torch.normal(
+                    mean=torch.zeros_like(mean_action),
+                    std=noise_std
+                )
+                action = mean_action + noise
             else:
-                print("[Exploitation: Learned sample]")
-                action = dist.sample()
+                # 🚧 큰 오차 → 보수적 행동
+                action = mean_action
 
             return torch.clamp(action, 0.0, 100.0)
+
+    # def act(self, obs, deterministic=False, enable_grad=False, exploration_std=0.03):
+    #     """
+    #     IQL 논문 스타일의 탐색:
+    #     - deterministic: 평균만 사용
+    #     - exploration: mean + N(0, σ²) (σ=0.03 추천)
+    #     """
+    #     with torch.set_grad_enabled(enable_grad):
+    #         dist = self(obs)
+    #         mean = dist.mean
+
+    #         if deterministic:
+    #             return torch.clamp(mean, 0.0, 100.0)  # 안전 범위 내 clip (선택)
+
+    #         # IQL 논문식 exploration: mean + Gaussian noise
+    #         noise = torch.normal(
+    #             mean=torch.zeros_like(mean),
+    #             std=exploration_std
+    #         )
+    #         action = mean + noise
+    #         return torch.clamp(action, 0.0, 100.0)  # clamp 없으면 히터가 음수일 수도 있음
+
+    #def online_act (self, obs, deterministic=False, enable_grad = False, )
+    def online_act(
+        self,
+        obs: torch.Tensor,
+        deterministic: bool = False,
+        enable_grad: bool = False,
+        err_thr: float = 4.0,        # |Tsp−T| ≤ err_thr 일 때만 노이즈 추가
+        noise_std: float = 10.0       # 가우시안 노이즈 표준편차 (PWM %)
+    ):
+        """
+        1 + 4 탐색 전략:
+        - 큰 오차(|Tsp - T| > err_thr) → 학습된 policy의 평균(mean)만 사용
+        - 작은 오차(|Tsp - T| ≤ err_thr) → mean + N(0, noise_std²) 로 탐색
+        """
+        with torch.set_grad_enabled(enable_grad):
+            dist = self(obs)
+            mean_action = dist.mean                      # [Q1_mean, Q2_mean]
+
+            if deterministic:
+                # 평가 모드: 항상 평균
+                return torch.clamp(mean_action, 0.0, 100.0)
+
+            # ── 현재 오차 계산 ───────────────────────────────────────
+            delta1 = obs[2] - obs[0]   # TSP1 - T1
+            delta2 = obs[3] - obs[1]   # TSP2 - T2
+
+            in_safe_region = (
+                torch.abs(delta1) <= err_thr and
+                torch.abs(delta2) <= err_thr
+            )
+
+            if in_safe_region:
+                noise = torch.normal(
+                    mean=torch.zeros_like(mean_action),
+                    std=noise_std,
+                    device=obs.device
+                )
+                action = mean_action + noise
+            else:
+                action = mean_action
+
+            return torch.clamp(action, 0.0, 100.0)
+
 
 
 class DeterministicPolicy(nn.Module):
