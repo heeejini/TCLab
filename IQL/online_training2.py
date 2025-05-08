@@ -5,12 +5,16 @@ from tqdm import trange
 import joblib
 import wandb
 import copy 
+from pathlib import Path 
+from datetime import datetime
 
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
 from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab
 from src.sam import SAM 
+
+
 
 def build_optimizer_factory(args):
     if args.sam:
@@ -94,11 +98,14 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
 
             done = (k == steps - 1)
 
-            buffer["observations"].append(obs)
-            buffer["actions"].append([Q1, Q2])
-            buffer["next_observations"].append(next_obs)
-            buffer["rewards"].append(reward)
-            buffer["terminals"].append(done)
+            # buffer["observations"].append(obs)
+            # buffer["actions"].append([Q1, Q2])
+            # buffer["next_observations"].append(next_obs)
+            # buffer["rewards"].append(reward)
+            # buffer["terminals"].append(done)
+
+            ### 버퍼에 추가하기 
+            buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
 
             T1, T2 = next_T1, next_T2
 
@@ -156,19 +163,28 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 
         done = (k == steps - 1)
 
-        buffer['observations'].append(obs)
-        buffer['actions'].append([Q1, Q2])
-        buffer['next_observations'].append(next_obs)
-        buffer['rewards'].append(reward)
-        buffer['terminals'].append(done)
+        # buffer['observations'].append(obs)
+        # buffer['actions'].append([Q1, Q2])
+        # buffer['next_observations'].append(next_obs)
+        # buffer['rewards'].append(reward)
+        # buffer['terminals'].append(done)
+
+        buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
 
         T1, T2 = next_T1, next_T2
 
 
 def online_finetune(args):
     torch.set_num_threads(1)
+    
+    from replay_buffer import ExperienceBufferManager 
+    buffer = ExperienceBufferManager()   
+
     wandb.init(project="tclab-project", name=args.exp_name, config=vars(args))
-    log = Log(Path(args.log_dir)/args.env_name, vars(args))
+
+    timestamp = datetime.now().strftime("%m-%d-%H%M")
+    log_dir = Path(args.log_dir) / args.env_name / f"{args.exp_name}_{timestamp}"
+    log = Log(log_dir, vars(args))
     set_seed(args.seed)
     optimizer_factory = build_optimizer_factory(args)
 
@@ -193,14 +209,21 @@ def online_finetune(args):
     reward_scaler = joblib.load(args.scaler)
 
 
-    buffer = {
-        "observations": [],
-        "actions": [],
-        "next_observations": [],
-        "rewards": [],
-        "terminals": []
-    }
+    # buffer = {
+    #     "observations": [],
+    #     "actions": [],
+    #     "next_observations": [],
+    #     "rewards": [],
+    #     "terminals": []
+    # }
 
+    if args.init_buffer : 
+        npz = np.load(args.init_buffer)
+        for k in buffer.keys():
+            buffer[k] = npz[k].tolist()
+        print(f"Pre-loaded buffer from {args.init_buffer}"
+              f"(size : {len(buffer['observations'])})")
+        
     best_total_error = float("inf")
     best_state = None
 
@@ -210,10 +233,12 @@ def online_finetune(args):
         elif args.type == "real" : 
             rollout_tclab(iql.policy, buffer, reward_scaler, args)
 
-        dataset = {
-            k: torchify(np.array(v, dtype=np.float32))
-            for k, v in buffer.items()
-        }
+        # dataset = {
+        #     k: torchify(np.array(v, dtype=np.float32))
+        #     for k, v in buffer.items()
+        # }
+
+        dataset = buffer.to_torch()
 
         for _ in range(args.update_per_episode):
             batch = sample_batch(dataset, args.batch_size)
@@ -259,10 +284,21 @@ def online_finetune(args):
             torch.save(iql.state_dict(), model_path)
             print(f"[EP {episode+1}] 🔄 5회차마다 저장됨: {model_path.name}")
 
+        ### 주기적 버퍼 저장 
+        if args.save_buffer_path and args.save_buffer_every > 0 \
+            and ((episode + 1) % args.save_buffer_every == 0):
+            # ex) logs_online_realkit/buffer_ep5.npz
+            buf_file = Path(args.save_buffer_path).with_stem(f"buffer_ep{episode+1}")
+            buffer.save(buf_file)
+
     if best_state is not None:
         iql.load_state_dict(best_state)
     torch.save(iql.state_dict(), log.dir / 'final_online.pt')
     print(f"최적 파라미터 저장 완료: {log.dir / 'final_online.pt'}")
+
+    if args.save_buffer_path:
+        buffer.save(args.save_buffer_path)   
+    
     wandb.finish()
     log.close()
 
@@ -302,7 +338,13 @@ if __name__ == "__main__":
                         help="SAM(Sharpness‑Aware Minimization) 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.05,
                         help="SAM perturbation 반경 ρ")
+    parser.add_argument("--init-buffer", default='', help="시작 시 불러올 .npz 버퍼 경로")
     parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / tclab kit)")
+    parser.add_argument("--save-buffer-path", default="./saved_buffer.npz",
+                    help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
+    parser.add_argument("--save-buffer-every", type=int, default=5,
+                        help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
+
     args = parser.parse_args()
     print(args.scaler)
     online_finetune(args)
