@@ -217,13 +217,16 @@ def online_finetune(args):
     #     "terminals": []
     # }
 
+    # if args.init_buffer : 
+    #     npz = np.load(args.init_buffer)
+    #     for k in buffer.keys():
+    #         buffer[k] = npz[k].tolist()
+    #     print(f"Pre-loaded buffer from {args.init_buffer}"
+    #           f"(size : {len(buffer['observations'])})")
+    
     if args.init_buffer : 
-        npz = np.load(args.init_buffer)
-        for k in buffer.keys():
-            buffer[k] = npz[k].tolist()
-        print(f"Pre-loaded buffer from {args.init_buffer}"
-              f"(size : {len(buffer['observations'])})")
-        
+        buffer.load(args.init_buffer)
+
     best_total_error = float("inf")
     best_state = None
 
@@ -270,10 +273,10 @@ def online_finetune(args):
                 #print(f"[EP {episode}] 성능 개선 total_error={total_error:.4f}")
                 torch.save(iql.state_dict(), log.dir / 'best.pt')
                 print(f"[EP {episode}] ✅ Best model 저장됨 (total_error={total_error:.4f})")
-            else:
-                if best_state is not None:
-                    iql.load_state_dict(best_state)
-                    print(f"[EP {episode}] 성능 악화. 이전 best(total_error={best_total_error:.4f})로 롤백")
+            # else:
+            #     if best_state is not None:
+            #         iql.load_state_dict(best_state)
+            #         print(f"[EP {episode}] 성능 악화. 이전 best(total_error={best_total_error:.4f})로 롤백")
 
         log.row(metrics)
         wandb.log(metrics)
@@ -333,7 +336,6 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--ambient', type=float, default=29.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
-    # argparse 영역 맨 아래쯤
     parser.add_argument("--sam", action="store_true",
                         help="SAM(Sharpness‑Aware Minimization) 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.05,
