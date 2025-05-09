@@ -7,7 +7,7 @@ import wandb
 import copy 
 from pathlib import Path 
 from datetime import datetime
-
+import json 
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
@@ -160,15 +160,9 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         raw_reward = -np.sqrt(err1**2 + err2**2)
         reward = reward_scaler.transform([[raw_reward]])[0][0]
 
-
         done = (k == steps - 1)
 
-        # buffer['observations'].append(obs)
-        # buffer['actions'].append([Q1, Q2])
-        # buffer['next_observations'].append(next_obs)
-        # buffer['rewards'].append(reward)
-        # buffer['terminals'].append(done)
-
+        ### 버퍼에 추가하기 
         buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
 
         T1, T2 = next_T1, next_T2
@@ -180,14 +174,33 @@ def online_finetune(args):
     from replay_buffer import ExperienceBufferManager 
     buffer = ExperienceBufferManager()   
 
-    wandb.init(project="tclab-project", name=args.exp_name, config=vars(args))
 
+
+    # ✅ 항상 먼저 선언
+    log_dir = Path(args.log_dir)
+
+    if args.resume:
+        with open(log_dir / "resume_info.json") as f:
+            resume_data = json.load(f)
+        wandb_id = resume_data.get("wandb_id", "")
+        print(f"완디비 resume 재개 {wandb_id}")
+    else:
+        wandb_id = ""
+
+    wandb.init(
+        project="tclab-project",
+        name=args.exp_name,
+        config=vars(args),
+        id=wandb_id or wandb.util.generate_id(),
+        resume="allow"
+    )
     timestamp = datetime.now().strftime("%m-%d-%H%M")
     log_dir = Path(args.log_dir) / args.env_name / f"{args.exp_name}_{timestamp}"
     log = Log(log_dir, vars(args))
     set_seed(args.seed)
     optimizer_factory = build_optimizer_factory(args)
 
+    
     obs_dim, act_dim = 4, 2
     if args.deterministic_policy:
         policy = DeterministicPolicy(obs_dim, act_dim, args.hidden_dim, args.n_hidden)
@@ -201,10 +214,23 @@ def online_finetune(args):
         optimizer_factory=optimizer_factory,
         max_steps=args.n_steps, tau=args.tau, beta=args.beta,
         discount=args.discount, alpha=args.alpha)
+    
+    resume_path = log_dir / "resume_info.json"
+    start_episode = 0
 
 
-    iql.load_state_dict(torch.load(args.pt_path))
-    print(f"Loaded pretrained IQL model from: {args.pt_path}")
+
+    if args.resume and resume_path.exists():
+        with open(resume_path) as f:
+            resume_data = json.load(f)
+            start_episode = resume_data.get("last_episode", 0) + 1
+            wandb_id = resume_data.get("wandb_id", "")
+        iql.load_state_dict(torch.load(log_dir / 'last.pt'))
+        print(f"✅ Resumed from {start_episode} with last.pt")
+    else:
+        wandb_id = ""
+        iql.load_state_dict(torch.load(args.pt_path))
+        print(f"🔁 Loaded pretrained IQL model from: {args.pt_path}")
 
     reward_scaler = joblib.load(args.scaler)
 
@@ -224,6 +250,9 @@ def online_finetune(args):
     #     print(f"Pre-loaded buffer from {args.init_buffer}"
     #           f"(size : {len(buffer['observations'])})")
     
+    wandb.init(project="tclab-project", name=args.exp_name, config=vars(args), id=wandb_id or wandb.util.generate_id(), resume="allow")
+    wandb_id = wandb.run.id
+
     if args.init_buffer : 
         buffer.load(args.init_buffer)
 
@@ -266,13 +295,15 @@ def online_finetune(args):
             print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Under 누락)")
             total_error = None
 
-        if total_error is not None:
-            if total_error < best_total_error:
-                best_total_error = total_error
-                best_state = copy.deepcopy(iql.state_dict())
-                #print(f"[EP {episode}] 성능 개선 total_error={total_error:.4f}")
-                torch.save(iql.state_dict(), log.dir / 'best.pt')
-                print(f"[EP {episode}] ✅ Best model 저장됨 (total_error={total_error:.4f})")
+        if total_error is not None and total_error < best_total_error:
+            best_total_error = total_error
+            best_state = copy.deepcopy(iql.state_dict())
+            torch.save(iql.state_dict(), log.dir / 'best.pt')
+            print(f"[EP {episode}] ✅ Best model 저장됨 (total_error={total_error:.4f})")
+
+        torch.save(iql.state_dict(), log.dir / 'last.pt')
+        with open(log.dir / "resume_info.json", "w") as f:
+            json.dump({"last_episode": episode, "wandb_id": wandb_id}, f)
             # else:
             #     if best_state is not None:
             #         iql.load_state_dict(best_state)
@@ -290,8 +321,8 @@ def online_finetune(args):
         ### 주기적 버퍼 저장 
         if args.save_buffer_path and args.save_buffer_every > 0 \
             and ((episode + 1) % args.save_buffer_every == 0):
-            # ex) logs_online_realkit/buffer_ep5.npz
-            buf_file = Path(args.save_buffer_path).with_stem(f"buffer_ep{episode+1}")
+            # logs_online_realkit/exp_name_타임스탬프/buffer_ep5.npz 형태로 저장됨
+            buf_file = log.dir / f"buffer_ep{episode+1}.npz"
             buffer.save(buf_file)
 
     if best_state is not None:
@@ -300,7 +331,10 @@ def online_finetune(args):
     print(f"최적 파라미터 저장 완료: {log.dir / 'final_online.pt'}")
 
     if args.save_buffer_path:
-        buffer.save(args.save_buffer_path)   
+        final_buf_path = log.dir / Path(args.save_buffer_path).name
+        buffer.save(final_buf_path)
+    print(f"replay buffer 저장 완료 : {final_buf_path}")
+
     
     wandb.finish()
     log.close()
@@ -312,8 +346,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # sam optimizer / 512 hidden dim 
     # 6개 obs C:/Users/Developer/TCLab/IQL/sam/tclab-mpc-iql/05-07-25_13.28.11_gigk/best.pt
-    parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
-    parser.add_argument('--scaler', default="C:\\Users\\Developer\\TCLab\\Data\\first_reward.pkl")
+    
+    #parser.add_argument('--pt-path', default = "C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/05-07-25_18.08.30_lzec/ep10.pt")
+    parser.add_argument('--pt-path', default="C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/realkit_save_buffer_05-08-1453/05-08-25_14.53.43_gbqn/best.pt" )
+    # 오프라인 학습으로 가장 성능 좋은 pt 파일 , 경로 아래 
+    #parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
+    parser.add_argument('--scaler', default="C:/Users/Developer/TCLab/Data/first_reward.pkl")
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
     parser.add_argument('--log-dir', default="./logs_online_realkit")
@@ -321,9 +359,9 @@ if __name__ == "__main__":
     parser.add_argument('--sample_interval', type=float, default=5.0)
     #n_episodes=100, update_per_episode=60
     # 1000
-    parser.add_argument('--n-episodes', type=int, default=250)
-    parser.add_argument('--update_per_episode', type=int, default=30)
-    parser.add_argument('--n-steps', type=int, default=7500) 
+    parser.add_argument('--n-episodes', type=int, default=30)
+    parser.add_argument('--update_per_episode', type=int, default=240)
+    parser.add_argument('--n-steps', type=int, default=8000) 
 
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--batch-size', type=int, default=256)
@@ -346,7 +384,8 @@ if __name__ == "__main__":
                     help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
     parser.add_argument("--save-buffer-every", type=int, default=5,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
-
+    parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
+    
     args = parser.parse_args()
     print(args.scaler)
     online_finetune(args)
