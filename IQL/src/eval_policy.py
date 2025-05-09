@@ -111,7 +111,8 @@ def simulator_policy(
     seed: int = 0,
     ambient: float = 29.0, # start_temp 
     deterministic: bool = True, 
-    scaler : str| Path = ''
+    scaler : str| Path = '',
+    reward_type : int = 2
 ):
     from .util import torchify, set_seed
     steps = int(total_time_sec/dt)
@@ -158,20 +159,29 @@ def simulator_policy(
         Q2[k] = float(np.clip(act[1], 0, 100))
         env.Q1(Q1[k])
         env.Q2(Q2[k])
+        # ▒▒ 에러 계산 분기 ▒▒
+        if reward_type == 1:
+            # 현재 시점 기준
+            err1 = Tsp1[k] - T1[k]
+            err2 = Tsp2[k] - T2[k]
+        elif reward_type == 2:
+            # 다음 시점 기준
+            print(f"reward type : {reward_type}")
+            next_T1, next_T2 = env.T1, env.T2
+            if k < steps - 1:
+                err1 = Tsp1[k + 1] - next_T1
+                err2 = Tsp2[k + 1] - next_T2
+            else:
+                err1 = Tsp1[k] - next_T1
+                err2 = Tsp2[k] - next_T2
+        else:
+            raise ValueError(f"Invalid reward_type: {reward_type} (must be 1 or 2)")
 
-        # 현재 에러계산 
-        err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
-
-        # time_sec = k * dt
-        # reward = compute_reward(err1, err2, time_sec, reward_scaler)
         reward = compute_reward(err1, err2, reward_scaler)
         total_ret += reward
-        
-        e1 += abs(err1);  e2 += abs(err2)
-        over  += max(0, -err1) + max(0, -err2)
-        under += max(0,  err1) + max(0,  err2)
-
-    env.Q1(0); env.Q2(0)
+        e1 += abs(err1); e2 += abs(err2)
+        over += max(0, -err1) + max(0, -err2)
+        under += max(0, err1) + max(0, err2)
 
     # CSV & 그래프 저장
     csv_path = run_dir / "rollout.csv"
@@ -200,39 +210,31 @@ def tclab_policy(
     dt: float = 5.0,
     log_root: str | Path = "./eval_real_logs",
     seed: int = 0,
-    ambient: float = 29.0,       # 필요 시 센서 목표 냉각 기준
+    ambient: float = 29.0,
     deterministic: bool = True,
-    scaler: str | Path = ''
+    scaler: str | Path = '',
+    reward_type: int = 1  # 1: 현재 T, 2: next T 기준
 ):
-    """
-    실제 USB‑TCLab 장치에서 정책 평가
-    simulator_policy와 동일한 로깅/리워드/타이밍 규칙을 적용한다.
-    """
     from .util import torchify, set_seed
-    steps   = int(total_time_sec / dt)
+    steps = int(total_time_sec / dt)
     set_seed(seed)
 
     run_dir = Path(log_root) / f"real_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 리워드 스케일러 
     print(f"scaler 경로 : {scaler}")
-    reward_scaler = joblib.load(scaler) if scaler else None   # 빈 문자열이면 None
+    reward_scaler = joblib.load(scaler) if scaler else None
 
-    # ── TCLab 연결 
     with TCLab() as arduino:
         arduino.LED(100)
         arduino.Q1(0); arduino.Q2(0)
 
-        # 냉각 기준(ambient)까지 대기
         while arduino.T1 > ambient or arduino.T2 > ambient:
             time.sleep(10)
 
-        # set‑point 시퀀스
         Tsp1 = generate_random_tsp(total_time_sec, dt)
         Tsp2 = generate_random_tsp(total_time_sec, dt)
 
-        # 버퍼
         t  = np.arange(steps) * dt
         T1 = np.zeros(steps); T2 = np.zeros(steps)
         Q1 = np.zeros(steps); Q2 = np.zeros(steps)
@@ -243,11 +245,9 @@ def tclab_policy(
         for k in trange(steps, desc="real"):
             loop_start = time.time()
 
-            # ── 센서 읽기 ─────
             T1[k] = arduino.T1
             T2[k] = arduino.T2
 
-            # ── 정책 행동 계산 
             obs = np.array([T1[k], T2[k], Tsp1[k], Tsp2[k]], dtype=np.float32)
             with torch.no_grad():
                 act = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
@@ -256,22 +256,25 @@ def tclab_policy(
             Q2[k] = float(np.clip(act[1], 0, 100))
             arduino.Q1(Q1[k]); arduino.Q2(Q2[k])
 
-            # ── 리워드 및 통계 
-            err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
-            # if reward_scaler is not None:
-            #     reward = compute_reward(err1, err2, reward_scaler)
-            # else:
-            #     reward = compute_reward(err1, err2)
+            time.sleep(max(0.0, dt - (time.time() - loop_start)))
+
+            # next observation
+            next_T1, next_T2 = arduino.T1, arduino.T2
+
+            # 리워드 계산 기준 분기
+            if reward_type == 1:
+                err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
+            elif reward_type == 2 and k < steps - 1:
+                err1, err2 = Tsp1[k + 1] - next_T1, Tsp2[k + 1] - next_T2
+            else:
+                err1, err2 = 0.0, 0.0  # 마지막 step은 reward 없음
+
             reward = compute_reward(err1, err2, reward_scaler)
             total_ret += reward
 
             e1 += abs(err1);  e2 += abs(err2)
-            over  += max(0, -err1) + max(0, -err2)
+            over += max(0, -err1) + max(0, -err2)
             under += max(0,  err1) + max(0,  err2)
-
-            # ── dt 간격 유지 
-            elapsed = time.time() - loop_start
-            time.sleep(max(0.0, dt - elapsed))
 
         arduino.Q1(0); arduino.Q2(0)
 

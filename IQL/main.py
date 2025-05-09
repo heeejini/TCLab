@@ -268,14 +268,16 @@ if __name__ == '__main__':
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
     #C:\Users\User\TCLab\Data\MPC\first_reward.npz
-    parser.add_argument('--npz-path', default="C:\\Users\\User\\TCLab\\dataset\\outputs\\first_reward.npz")
-    parser.add_argument('--scaler')
+    parser.add_argument('--npz-path', default="C:/Users/Developer/TCLab/Data/MPC/second_reward.npz")
+    parser.add_argument('--scaler', default= "C:/Users/Developer/TCLab/Data/second_reward.pkl")
     # main.py 맨 위 argparse 부분
     parser.add_argument("--sam", action="store_true",
                         help="Sharpness-Aware Minimization 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.03,
                         help="SAM perturbation half-width (ρ)")
     parser.add_argument('--method', default='simulator') # eval 시에 어떤 것을 통해서 할 지
+    parser.add_argument('--reward-type', type=int, default=2, help="리워드 계산 기준 (1: 현재, 2: 다음)")
+
     #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
     #C:\\Users\\Developer\\TCLab\\Data\\next_reward_timeerror_scaler.pkl
     #  C:\\Users\\Developer\\TCLab\\Data\\next_reward_scaler.pkl

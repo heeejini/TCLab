@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from .util import DEFAULT_DEVICE, compute_batched, update_exponential_moving_average
-
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 EXP_ADV_MAX = 100
 
