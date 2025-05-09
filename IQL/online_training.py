@@ -87,10 +87,12 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
             next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next],
                                 dtype=np.float32)
 
-            err1 = TSP1_mean - T1
-            err2 = TSP2_mean - T2
+            # ─ 리워드 계산 (next 기반)
+            err1 = TSP1_next - next_T1
+            err2 = TSP2_next - next_T2
             raw_reward = -np.sqrt(err1**2 + err2**2)
             reward = reward_scaler.transform([[raw_reward]])[0][0]
+
 
             done = (k == steps - 1)
 
@@ -148,12 +150,12 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 
         next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next], dtype=np.float32)
 
-        err1 = TSP1_mean - T1
-        err2 = TSP2_mean - T2
+        # ─ 리워드 계산 (next 기반)
+        err1 = TSP1_next - next_T1
+        err2 = TSP2_next - next_T2
         raw_reward = -np.sqrt(err1**2 + err2**2)
         reward = reward_scaler.transform([[raw_reward]])[0][0]
-
-
+        
         done = (k == steps - 1)
 
         buffer['observations'].append(obs)
@@ -264,7 +266,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     # sam optimizer / 512 hidden dim 
-    parser.add_argument('--pt-path',  default="C:\\Users\\User\\TCLab\\IQL\\sam\\tclab-mpc-iql\\05-05-25_12.38.17_hrpy\\best.pt")
+    parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
     parser.add_argument('--scaler', default="C:\\Users\\Developer\\TCLab\\Data\\first_reward.pkl")
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
@@ -273,9 +275,9 @@ if __name__ == "__main__":
     parser.add_argument('--sample_interval', type=float, default=5.0)
     #n_episodes=100, update_per_episode=60
     # 1000
-    parser.add_argument('--n-episodes', type=int, default=2000)
-    parser.add_argument('--update_per_episode', type=int, default=240)
-    parser.add_argument('--n-steps', type=int, default=485000) 
+    parser.add_argument('--n-episodes', type=int, default=500)
+    parser.add_argument('--update_per_episode', type=int, default=60)
+    parser.add_argument('--n-steps', type=int, default=30000) 
 
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--batch-size', type=int, default=256)
