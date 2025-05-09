@@ -213,7 +213,7 @@ def tclab_policy(
     ambient: float = 29.0,
     deterministic: bool = True,
     scaler: str | Path = '',
-    reward_type: int = 1  # 1: 현재 T, 2: next T 기준
+    reward_type: int = 2  # 1: 현재 T, 2: next T 기준
 ):
     from .util import torchify, set_seed
     steps = int(total_time_sec / dt)
