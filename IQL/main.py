@@ -43,7 +43,7 @@ def build_optimizer_factory(args):
 def main(args):
     torch.set_num_threads(1)
     wandb.init(
-        project="tclab-project",
+        project="tclab-project1",
         name=args.exp_name,
         entity="jhj0628",
         config=vars(args)  # 모든 하이퍼파라미터 자동 저장
@@ -251,7 +251,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--env-name', default='tclab-mpc-iql')
     parser.add_argument('--log-dir', default='./sam')
-    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--seed', type=int, default=3)
     parser.add_argument('--discount', type=float, default=0.99)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
@@ -268,8 +268,9 @@ if __name__ == '__main__':
     parser.add_argument('--sample_interval', type=float, default=5.0)
     parser.add_argument('--exp_name', default='iql_default')
     #C:\Users\User\TCLab\Data\MPC\first_reward.npz
-    parser.add_argument('--npz-path', default="C:/Users/Developer/TCLab/Data/MPC/second_reward.npz")
-    parser.add_argument('--scaler', default= "C:/Users/Developer/TCLab/Data/second_reward.pkl")
+    #C:\Users\User\tclab1\Data\first_reward.pkl
+    parser.add_argument('--npz-path', default="C:/Users/User/tclab1/Data/first_reward.npz")
+    parser.add_argument('--scaler', default= "C:/Users/User/tclab1/Data/first_reward.pkl")
     # main.py 맨 위 argparse 부분
     parser.add_argument("--sam", action="store_true",
                         help="Sharpness-Aware Minimization 사용 여부")

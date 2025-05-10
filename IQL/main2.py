@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from tqdm import trange
 import wandb
+import copy 
 
 from src.sam import SAM
 from src.iql import ImplicitQLearning
@@ -269,16 +270,16 @@ def main(args):
 
     # ---------------------- Extra evaluation (seed 2/3/4) ---------------------- #
     if args.eval_seeds:
-        print("\n Extra evaluation with seeds:", args.eval_seeds)
+        print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
 
         extra_rows = []
         for s in args.eval_seeds:
-            set_seed(s)
-            metrics = eval_policy(iql.policy, args)
+            tmp_args = copy.copy(args)
+            tmp_args.seed = s
+            metrics = eval_policy(iql.policy, tmp_args)
 
-            total_error = (
-                metrics["E1"] + metrics["E2"] + metrics["Over"] + metrics["Under"]
-            )
+            total_error = (metrics["E1"] + metrics["E2"] +
+                        metrics["Over"] + metrics["Under"])
             metrics.update({"total_error": total_error, "seed": s})
 
             # 콘솔 출력
@@ -286,11 +287,19 @@ def main(args):
             print(f"    total_return = {metrics['total_return']:.3f}")
             print(f"    total_error  = {metrics['total_error']:.3f}")
 
-            # 로그 & wandb
-            log.row({f"extra_{k}": v for k, v in metrics.items()})
-            wandb.log({f"extra_{k}": v for k, v in metrics.items()})
-            extra_rows.append(metrics)
+            extra_rows.append(metrics)          # ✅ 먼저 리스트에 누적
+            log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
+            wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
 
+        # --- 모든 시드 수집 후 Table 한 번 생성 ---
+        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+        for r in extra_rows:
+            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+        wandb.log({"extra_eval_table": tbl})
+
+
+ # 코드에서 seed 만큼 for 문 반복하는데 extra log 찍는 건 이름 다 똑같이 하는거아닌가?
+ # 그러면 평균도 아니고 이어서 나올 거 같은데 수정해야돼?
         # ▶ 평균 계산
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
