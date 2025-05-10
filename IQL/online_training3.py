@@ -79,36 +79,28 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
 
             time.sleep(dt)                    # dt 초 대기 
             next_T1, next_T2 = arduino.T1, arduino.T2
+            
+            if args.reward_type == 1:               # 현재 오차
+                err1 = Tsp1[k] - T1
+                err2 = Tsp2[k] - T2
+            else:                                   # 다음 오차 (default=2)
+                if k < steps - 1:
+                    err1 = Tsp1[k + 1] - next_T1
+                    err2 = Tsp2[k + 1] - next_T2
+                else:
+                    err1 = Tsp1[k] - next_T1
+                    err2 = Tsp2[k] - next_T2
+            reward = compute_reward(err1, err2, reward_scaler)
+            done   = (k == steps - 1)
 
-            if k == steps - 1:
-                TSP1_next, TSP2_next = Tsp1[k], Tsp2[k]
-                TSP1_mean, TSP2_mean = Tsp1[k], Tsp2[k]
-            else:
-                TSP1_next, TSP2_next = Tsp1[k + 1], Tsp2[k + 1]
-                TSP1_mean = 0.5 * (Tsp1[k] + Tsp1[k + 1])
-                TSP2_mean = 0.5 * (Tsp2[k] + Tsp2[k + 1])
+            next_obs = np.array(
+                [next_T1, next_T2,
+                 (Tsp1[k] if args.reward_type==1 else Tsp1[min(k+1, steps-1)]),
+                 (Tsp2[k] if args.reward_type==1 else Tsp2[min(k+1, steps-1)])],
+                dtype=np.float32)
 
-            next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next],
-                                dtype=np.float32)
-
-            err1 = TSP1_mean - T1
-            err2 = TSP2_mean - T2
-            raw_reward = -np.sqrt(err1**2 + err2**2)
-            reward = reward_scaler.transform([[raw_reward]])[0][0]
-
-            done = (k == steps - 1)
-
-            # buffer["observations"].append(obs)
-            # buffer["actions"].append([Q1, Q2])
-            # buffer["next_observations"].append(next_obs)
-            # buffer["rewards"].append(reward)
-            # buffer["terminals"].append(done)
-
-            ### 버퍼에 추가하기 
-            buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
-
+            buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
             T1, T2 = next_T1, next_T2
-
         arduino.Q1(0); arduino.Q2(0)
 
 
@@ -146,25 +138,24 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         next_T1, next_T2 = env.T1, env.T2
 
     
-        if k == steps - 1:
-            TSP1_next = Tsp1[k]
-            TSP2_next = Tsp2[k]
-            TSP1_mean = Tsp1[k]
-            TSP2_mean = Tsp2[k]
+        if args.reward_type == 1:
+            err1 = Tsp1[k] - T1
+            err2 = Tsp2[k] - T2
         else:
-            TSP1_next = Tsp1[k + 1]
-            TSP2_next = Tsp2[k + 1]
-            TSP1_mean = (Tsp1[k] + Tsp1[k + 1]) / 2
-            TSP2_mean = (Tsp2[k] + Tsp2[k + 1]) / 2
+            if k < steps - 1:
+                err1 = Tsp1[k + 1] - next_T1
+                err2 = Tsp2[k + 1] - next_T2
+            else:
+                err1 = Tsp1[k] - next_T1
+                err2 = Tsp2[k] - next_T2
+        reward = compute_reward(err1, err2, reward_scaler)
+        done   = (k == steps - 1)
 
-        next_obs = np.array([next_T1, next_T2, TSP1_next, TSP2_next], dtype=np.float32)
-
-        err1 = TSP1_mean - T1
-        err2 = TSP2_mean - T2
-        raw_reward = -np.sqrt(err1**2 + err2**2)
-        reward = reward_scaler.transform([[raw_reward]])[0][0]
-
-        done = (k == steps - 1)
+        next_obs = np.array(
+            [next_T1, next_T2,
+             (Tsp1[k] if args.reward_type==1 else Tsp1[min(k+1, steps-1)]),
+             (Tsp2[k] if args.reward_type==1 else Tsp2[min(k+1, steps-1)])],
+            dtype=np.float32)
 
         ### 버퍼에 추가하기 
         buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
@@ -225,7 +216,7 @@ def online_finetune(args):
         print(f"🔁 Loaded pretrained IQL model from: {args.pt_path}")
         reward_scaler = joblib.load(args.scaler)
     wandb.init(
-        project="tclab-project",
+        project="tclab-project1",
         name=args.exp_name,
         config=vars(args),
         id=wandb_id or wandb.util.generate_id(),
@@ -261,15 +252,10 @@ def online_finetune(args):
         elif args.type == "real" : 
             rollout_tclab(iql.policy, buffer, reward_scaler, args)
 
-        # dataset = {
-        #     k: torchify(np.array(v, dtype=np.float32))
-        #     for k, v in buffer.items()
-        # }
 
         dataset = buffer.to_torch()
 
-        if episode >= args.warmup_episodes :
-                
+        if episode >= args.warmup_episodes : 
             for _ in range(args.update_per_episode):
                 batch = sample_batch(dataset, args.batch_size)
                 loss_dict = iql.update(**batch)
@@ -290,7 +276,6 @@ def online_finetune(args):
         metrics.update({"episode": episode})
         metrics.update(loss_dict)
 
-        # total_error 계산
         try:
             total_error = (
                 metrics["E1"] + metrics["E2"] +
@@ -301,37 +286,15 @@ def online_finetune(args):
             print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Under 누락)")
             total_error = None
 
-        # 1. best model 저장 (조건 있음)
         if total_error is not None and total_error < best_total_error:
             best_total_error = total_error
             best_state = copy.deepcopy(iql.state_dict())
             torch.save(iql.state_dict(), log.dir / 'best.pt')
             print(f"[EP {episode}] ✅ Best model 저장됨 (total_error={total_error:.4f})")
 
-        # 2. 🔁 항상 현재 상태 저장 (resume용)
-
-
-            #     if best_state is not None:
-            #         iql.load_state_dict(best_state)
-            #         print(f"[EP {episode}] 성능 악화. 이전 best(total_error={best_total_error:.4f})로 롤백")
-
         log.row(metrics)
         wandb.log(metrics)
-        # 5episode 마다 저장 
 
-        # if (episode + 1) % 2 == 0:
-        #     model_path = log.dir / f"ep{episode+1}.pt"
-        #     torch.save(iql.state_dict(), model_path)
-        #     print(f"[EP {episode+1}] 🔄 2회차마다 저장됨: {model_path.name}")
-        #     torch.save(iql.state_dict(), log.dir / f'{episode+1}_last.pt')
-        #     with open(log.dir / f"resume_info_{episode+1}.json", "w") as f:
-        #         json.dump({
-        #             "last_episode": episode,
-        #             "wandb_id": wandb_id
-        #         }, f)
-        #     print(f"[EP {episode}] 💾 현재 상태 저장 완료 (last.pt & resume_info.json)")
-
-        ### 주기적 버퍼 저장 
         if args.save_buffer_path and args.save_buffer_every > 0 \
             and ((episode + 1) % args.save_buffer_every == 0):
             # logs_online_realkit/exp_name_타임스탬프/buffer_ep5.npz 형태로 저장됨
@@ -347,6 +310,65 @@ def online_finetune(args):
         final_buf_path = log.dir / Path(args.save_buffer_path).name
         buffer.save(final_buf_path)
     print(f"replay buffer 저장 완료 : {final_buf_path}")
+
+    # ---------------------- Extra evaluation (seed 2/3/4) ---------------------- #
+    if args.eval_seeds:
+        print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
+
+        extra_rows = []
+        for s in args.eval_seeds:
+            tmp_args = copy.copy(args)
+            tmp_args.seed = s
+            metrics = eval_policy(iql.policy, tmp_args)
+
+            total_error = (metrics["E1"] + metrics["E2"] +
+                        metrics["Over"] + metrics["Under"])
+            metrics.update({"total_error": total_error, "seed": s})
+
+            # 콘솔 출력
+            print(f"\n  Seed {s}:")
+            print(f"    total_return = {metrics['total_return']:.3f}")
+            print(f"    total_error  = {metrics['total_error']:.3f}")
+
+            extra_rows.append(metrics)          # ✅ 먼저 리스트에 누적
+            log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
+            wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
+
+        # --- 모든 시드 수집 후 Table 한 번 생성 ---
+        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+        for r in extra_rows:
+            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+        wandb.log({"extra_eval_table": tbl})
+
+        avg_return = np.mean([m["total_return"] for m in extra_rows])
+        avg_error = np.mean([m["total_error"] for m in extra_rows])
+
+        # 요청: avg_error 값을 total_error 로 간주
+        avg_metrics = {
+            "seed": "avg",
+            "total_return": avg_return,
+            "total_error": avg_error,
+        }
+
+        print(
+            f"\n📊 Avg over seeds {args.eval_seeds}: "
+            f"total_return = {avg_return:.3f},  total_error = {avg_error:.3f}"
+        )
+
+        wandb.log({"extra_avg_total_return": avg_return, "extra_avg_total_error": avg_error})
+        log.row(avg_metrics)
+
+        # CSV 저장
+        import csv
+
+        csv_path = log.dir / "extra_eval.csv"
+        with open(csv_path, "w", newline="") as f:
+            fieldnames = list(extra_rows[0].keys())
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(extra_rows)
+            writer.writerow(avg_metrics)
+        print(f"✅ Extra-evaluation results saved to {csv_path}")
 
     
     wandb.finish()
@@ -387,7 +409,7 @@ if __name__ == "__main__":
     parser.add_argument('--tau', type=float, default=0.9)
     parser.add_argument('--beta', type=float, default=5.0)
     parser.add_argument('--alpha', type=float, default=0.005)
-    parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--seed', type=int, default=3)
     parser.add_argument('--ambient', type=float, default=29.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
     parser.add_argument("--sam", action="store_true",
@@ -401,6 +423,16 @@ if __name__ == "__main__":
     parser.add_argument("--save-buffer-every", type=int, default=0,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
     parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
+    parser.add_argument("--reward_type", type=int, default=2)
+
+    # 📌 추가: extra evaluation seeds
+    parser.add_argument(
+        "--eval-seeds",
+        nargs="*",
+        type=int,
+        default=None,
+        help="추가 평가용 random seed 목록 (예: --eval-seeds 1 2 3 )",
+    )
 
 
     args = parser.parse_args()

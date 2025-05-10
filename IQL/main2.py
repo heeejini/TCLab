@@ -297,10 +297,6 @@ def main(args):
             tbl.add_data(r["seed"], r["total_error"], r["total_return"])
         wandb.log({"extra_eval_table": tbl})
 
-
- # 코드에서 seed 만큼 for 문 반복하는데 extra log 찍는 건 이름 다 똑같이 하는거아닌가?
- # 그러면 평균도 아니고 이어서 나올 거 같은데 수정해야돼?
-        # ▶ 평균 계산
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
 
@@ -353,10 +349,10 @@ if __name__ == "__main__":
     parser.add_argument("--n-hidden", type=int, default=2)
     parser.add_argument("--n-steps", type=int, default=10 ** 5 * 3)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--alpha", type=float, default=0.005)
     parser.add_argument("--tau", type=float, default=0.8)
-    parser.add_argument("--beta", type=float, default=10.0)
+    parser.add_argument("--beta", type=float, default=3.0)
     parser.add_argument(
         "--stochastic-policy", action="store_false", dest="deterministic_policy"
     )
