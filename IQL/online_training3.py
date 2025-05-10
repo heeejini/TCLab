@@ -13,6 +13,13 @@ from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
 from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab
 from src.sam import SAM 
+from src.eval_policy import compute_reward 
+
+def eval_policy( policy, args):
+    if args.method == "simulator":
+        return evaluate_policy_sim(policy, args)
+    else:
+        return evaluate_policy_tclab(policy, args)
 
 
 
@@ -383,10 +390,10 @@ if __name__ == "__main__":
     # 6개 obs C:/Users/Developer/TCLab/IQL/sam/tclab-mpc-iql/05-07-25_13.28.11_gigk/best.pt
     
     #parser.add_argument('--pt-path', default = "C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/05-07-25_18.08.30_lzec/ep10.pt")
-    parser.add_argument('--pt-path', default="C:\\Users\\Developer\\TCLab\\IQL\\logs_online_realkit\\tclab-online\\realkit_save_buffer_05-09-1001\\05-09-25_10.01.34_ayge\\best.pt" )
+    parser.add_argument('--pt-path', default="C:\\Users\\User\\tclab1\\IQL\\sam\\tclab-mpc-iql\\05-10-25_18.14.24_tplg\\best.pt" )
     # 오프라인 학습으로 가장 성능 좋은 pt 파일 , 경로 아래 
     #parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
-    parser.add_argument('--scaler', default="C:/Users/Developer/TCLab/Data/first_reward.pkl")
+    parser.add_argument('--scaler', default="C:\\Users\\User\\tclab1\\Data\\first_reward.pkl")
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
     parser.add_argument('--log-dir', default="./logs_online_realkit")
