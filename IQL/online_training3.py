@@ -102,9 +102,10 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
 
             next_obs = np.array(
                 [next_T1, next_T2,
-                 (Tsp1[k+1] if args.reward_type==1 else Tsp1[min(k+1, steps-1)]),
-                 (Tsp2[k+1] if args.reward_type==1 else Tsp2[min(k+1, steps-1)])],
-                dtype=np.float32)
+                Tsp1[min(k + 1, steps - 1)],
+                Tsp2[min(k + 1, steps - 1)]],
+                dtype=np.float32
+            )
 
             buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
             T1, T2 = next_T1, next_T2
@@ -157,12 +158,12 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
                 err2 = Tsp2[k] - next_T2
         reward = compute_reward(err1, err2, reward_scaler)
         done   = (k == steps - 1)
-
         next_obs = np.array(
             [next_T1, next_T2,
-             (Tsp1[k+1] if args.reward_type==1 else Tsp1[min(k+1, steps-1)]),
-             (Tsp2[k+1] if args.reward_type==1 else Tsp2[min(k+1, steps-1)])],
-            dtype=np.float32)
+            Tsp1[min(k + 1, steps - 1)],
+            Tsp2[min(k + 1, steps - 1)]],
+            dtype=np.float32
+        )
 
         ### 버퍼에 추가하기 
         buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
