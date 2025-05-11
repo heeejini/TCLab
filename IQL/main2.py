@@ -89,7 +89,7 @@ def main(args):
     def eval_policy(policy, args):
         if args.method == "simulator":
             return evaluate_policy_sim(policy, args)
-        else:
+        elif args.method == "real":
             return evaluate_policy_tclab(policy, args)
 
     # IQL
@@ -292,10 +292,20 @@ def main(args):
             wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
 
         # --- 모든 시드 수집 후 Table 한 번 생성 ---
-        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
-        for r in extra_rows:
-            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
-        wandb.log({"extra_eval_table": tbl})
+            tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+
+            for r in extra_rows:
+                seed = r.get("seed")
+                err  = r.get("total_error")
+                ret  = r.get("total_return")
+
+                if isinstance(err, (int, float)) and isinstance(ret, (int, float)):
+                    tbl.add_data(seed, err, ret)
+                else:
+                    print(f"⚠️ 테이블 생략: seed={seed}, error={err}, return={ret}")
+
+            wandb.log({"extra_eval_table": tbl})
+
 
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])

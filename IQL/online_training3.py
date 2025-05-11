@@ -16,7 +16,7 @@ from src.sam import SAM
 from src.eval_policy import compute_reward 
 
 def eval_policy( policy, args):
-    if args.method == "simulator":
+    if args.type == "simulator":
         return evaluate_policy_sim(policy, args)
     else:
         return evaluate_policy_tclab(policy, args)
@@ -34,7 +34,45 @@ def build_optimizer_factory(args):
     else:
         return lambda params: torch.optim.Adam(params,
                                                lr=args.learning_rate)
+import time
+def generate_random_tsp1(
+    total_time_sec: int = 1200,
+    dt: float = 5.0,  # sample / control interval
+    low: float = 25.0,
+    high: float = 65.0,
+    verbose: bool = False,
+) -> np.ndarray:
+    """
+    Set-point 구간별 정보를 로그로 출력.
+    각 구간 길이: 평균 480초, σ 100초, 최소 160초, 최대 800초
+    """
+    # 🎲 시드 무작위 초기화 (시간 + 잡음 기반)
+    seed = int((time.time() * 1e6) % 1e9)  # 마이크로초 기반 seed
+    np.random.seed(seed)
+    print(f"[🧪 TSP 생성용 시드: {seed}]")
 
+    n_steps = int(total_time_sec / dt)
+    tsp = np.zeros(n_steps)
+    i = 0
+    seg_id = 1  # 구간 번호
+
+    print(f"\n--- Set-point 프로파일 생성 (총 시간: {total_time_sec}초, 총 step: {n_steps}) ---")
+    while i < n_steps:
+        dur_sec = int(np.clip(np.random.normal(480, 100), 160, 800))
+        dur_steps = max(1, int(dur_sec / dt))
+        end = min(i + dur_steps, n_steps)
+
+        temp = round(np.random.uniform(low, high), 2)
+        tsp[i:end] = temp
+
+        start_time = int(i * dt)
+        end_time = int((end - 1) * dt)
+        print(f"구간 {seg_id}: step {i:>3} ~ {end-1:>3} (시간 {start_time:>4}s ~ {end_time:>4}s) → 목표 온도: {temp:.2f}°C")
+
+        i = end
+        seg_id += 1
+    print("-----------------------------------------------------------\n")
+    return tsp
 
 def rollout_tclab(policy, buffer, reward_scaler, args):
     """
@@ -59,8 +97,8 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
     policy.eval()
 
     # ── set‑point 프로파일 ──────────────────────────────────────
-    Tsp1 = generate_random_tsp(args.max_episode_steps, dt)
-    Tsp2 = generate_random_tsp(args.max_episode_steps, dt)
+    Tsp1 = generate_random_tsp1(args.max_episode_steps, dt)
+    Tsp2 = generate_random_tsp1(args.max_episode_steps, dt)
 
     # ── 보드 연결 ────────────────────────────────────────────────
     with TCLab() as arduino:
@@ -134,7 +172,7 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         #### 
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
-            action = policy.directional_override_act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
+            action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
 
         
         Q1 = float(np.clip(action[0], 0, 100))
@@ -343,10 +381,24 @@ def online_finetune(args):
             wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
 
         # --- 모든 시드 수집 후 Table 한 번 생성 ---
+     #   tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+     #   for r in extra_rows:
+     #       tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+     #   wandb.log({"extra_eval_table": tbl})
         tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+
         for r in extra_rows:
-            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+            seed = r.get("seed")
+            err  = r.get("total_error")
+            ret  = r.get("total_return")
+
+            if isinstance(err, (int, float)) and isinstance(ret, (int, float)):
+                tbl.add_data(seed, err, ret)
+            else:
+                print(f"⚠️ 테이블 생략: seed={seed}, error={err}, return={ret}")
+
         wandb.log({"extra_eval_table": tbl})
+
 
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
@@ -403,19 +455,19 @@ if __name__ == "__main__":
     #n_episodes=100, update_per_episode=60
     # 1000
 # 탐색이 있는 온라인 fine-tune, 20~30 epoch 목표
-    parser.add_argument('--n-episodes',         type=int, default=250)   # 총 episode
-    parser.add_argument('--update_per_episode', type=int, default=60)   # episode마다 60 update
-    parser.add_argument('--n-steps',            type=int, default=9500) # 9 000 step보다 약간 크게
+    parser.add_argument('--n-episodes',         type=int, default=20)   # 총 episode
+    parser.add_argument('--update_per_episode', type=int, default=30)   # episode마다 60 update
+    parser.add_argument('--n-steps',            type=int, default=800) # 9 000 step보다 약간 크게
 
-    parser.add_argument('--warmup-episodes', type=int, default=100,
+    parser.add_argument('--warmup-episodes', type=int, default=0,
                     help='초기 rollout만 수행하고 업데이트는 생략할 에피소드 수')
     parser.add_argument('--learning-rate', type=float, default=3e-4)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--tau', type=float, default=0.9)
-    parser.add_argument('--beta', type=float, default=5.0)
+    parser.add_argument('--tau', type=float, default=0.8)
+    parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--seed', type=int, default=3)
     parser.add_argument('--ambient', type=float, default=29.0)
@@ -424,14 +476,18 @@ if __name__ == "__main__":
                         help="SAM(Sharpness‑Aware Minimization) 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.05,
                         help="SAM perturbation 반경 ρ")
+
+
     parser.add_argument("--init-buffer", default='', help="시작 시 불러올 .npz 버퍼 경로")
+
+
     parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / tclab kit)")
     parser.add_argument("--save-buffer-path", default="./saved_buffer.npz",
                     help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
-    parser.add_argument("--save-buffer-every", type=int, default=0,
+    parser.add_argument("--save-buffer-every", type=int, default=2,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
     parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
-    parser.add_argument("--reward_type", type=int, default=2)
+    parser.add_argument("--reward_type", type=int, default=1)
 
     # 📌 추가: extra evaluation seeds
     parser.add_argument(
@@ -439,7 +495,7 @@ if __name__ == "__main__":
         nargs="*",
         type=int,
         default=None,
-        help="추가 평가용 random seed 목록 (예: --eval-seeds 1 2 3 )",
+        help="추가 평가용 random seed 목록 (예: --eval-seeds 0 1 2 )",
     )
 
 

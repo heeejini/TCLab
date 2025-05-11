@@ -162,6 +162,7 @@ def simulator_policy(
         # ▒▒ 에러 계산 분기 ▒▒
         if reward_type == 1:
             # 현재 시점 기준
+            print(f"reward type : {reward_type}")
             err1 = Tsp1[k] - T1[k]
             err2 = Tsp2[k] - T2[k]
         elif reward_type == 2:
