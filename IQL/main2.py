@@ -292,20 +292,10 @@ def main(args):
             wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
 
         # --- 모든 시드 수집 후 Table 한 번 생성 ---
-            tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
-
-            for r in extra_rows:
-                seed = r.get("seed")
-                err  = r.get("total_error")
-                ret  = r.get("total_return")
-
-                if isinstance(err, (int, float)) and isinstance(ret, (int, float)):
-                    tbl.add_data(seed, err, ret)
-                else:
-                    print(f"⚠️ 테이블 생략: seed={seed}, error={err}, return={ret}")
-
-            wandb.log({"extra_eval_table": tbl})
-
+        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+        for r in extra_rows:
+            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+        wandb.log({"extra_eval_table": tbl})
 
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
@@ -377,8 +367,8 @@ if __name__ == "__main__":
     parser.add_argument("--exp_name", default="iql_default")
     
     #first_reward / next_reward_scaler
-    parser.add_argument("--npz-path", default="C:/Users/User/tclab1/Data/next_reward_scaler.npz")
-    parser.add_argument("--scaler", default="C:/Users/User/tclab1/Data/next_reward_scaler.pkl")
+    parser.add_argument("--npz-path", default="C:/Users/User/tclab1/Data/first_reward.npz")
+    parser.add_argument("--scaler", default="C:/Users/User/tclab1/Data/first_reward.pkl")
 
     # SAM
     parser.add_argument("--sam", action="store_true", help="Sharpness-Aware Minimization 사용 여부")
@@ -386,7 +376,7 @@ if __name__ == "__main__":
 
     # 평가 방식
     parser.add_argument("--method", default="simulator")
-    parser.add_argument("--reward_type", type=int, default=2)
+    parser.add_argument("--reward_type", type=int, default=1)
 
     # 📌 추가: extra evaluation seeds
     parser.add_argument(
