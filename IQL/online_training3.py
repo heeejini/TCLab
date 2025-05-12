@@ -14,6 +14,9 @@ from src.iql import ImplicitQLearning
 from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab
 from src.sam import SAM 
 from src.eval_policy import compute_reward 
+from collections import deque
+N_STEP_REWARD = 5
+
 
 def eval_policy( policy, args):
     if args.type == "simulator":
@@ -73,140 +76,184 @@ def generate_random_tsp1(
         seg_id += 1
     print("-----------------------------------------------------------\n")
     return tsp
+from collections import deque           # ★ 추가
 
 def rollout_tclab(policy, buffer, reward_scaler, args):
     """
-    온라인 학습용 데이터를 실제 TCLab 보드에서 수집하여 buffer 에 추가한다.
-    시뮬레이터용 rollout 과 동일하게
-      - 관측 = [T1, T2, TSP1, TSP2]
-      - 행동  = [Q1, Q2]  (0‑100 %)
-      - 리워드 = -sqrt(err1² + err2²)  (optionally scaled)
-    를 기록한다.
+    실제 USB-TCLab 장치에서 n-step 리워드까지 지원하는 rollout
+      reward_type = 1 :  |TSP_t − T_t|
+      reward_type = 2 :  |TSP_t − T_{t+1}|
+      reward_type = 3 :  |TSP_t − T_{t+N}|   (N = args.n_step)
     """
-    import time
-    import numpy as np
-    import joblib
+    import time, joblib
     from tclab import TCLab
     from tqdm import trange
-    from src.eval_policy import generate_random_tsp
     from src.util import torchify
 
-    dt       = args.sample_interval      
-    steps    = int(args.max_episode_steps / dt)
-    ambient  = 29.0             
-    policy.eval()
+    dt    = args.sample_interval
+    steps = int(args.max_episode_steps / dt)
+    N     = getattr(args, "n_step", 5)          # 기본 5-step
+    ambient = 29.0
 
-    # ── set‑point 프로파일 ──────────────────────────────────────
+    # ---------- set-point ----------
     Tsp1 = generate_random_tsp1(args.max_episode_steps, dt)
     Tsp2 = generate_random_tsp1(args.max_episode_steps, dt)
 
-    # ── 보드 연결 ────────────────────────────────────────────────
+    # ---------- 4개의 deque ----------
+    obs_q, act_q, tsp_q, temp_q = deque(), deque(), deque(), deque()
+
     with TCLab() as arduino:
         arduino.LED(100)
         arduino.Q1(0); arduino.Q2(0)
 
-        # (선택) 냉각 대기
         while arduino.T1 > ambient or arduino.T2 > ambient:
             time.sleep(10)
 
-        T1, T2 = arduino.T1, arduino.T2  # 초기 센서값
+        policy.eval()
 
-        for k in trange(steps, desc="rollout‑tclab"):
+        for k in trange(steps, desc="rollout-tclab"):
             loop_start = time.time()
 
-            obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
-            with torch.no_grad():
-                action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
+            # ── 현재 관측, 행동 ───────────────────────────
+            T1, T2 = arduino.T1, arduino.T2
+            obs    = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
 
-            Q1 = float(np.clip(action[0], 0, 100))
-            Q2 = float(np.clip(action[1], 0, 100))
+            with torch.no_grad():
+                act = policy.act(torchify(obs),
+                                 deterministic=args.deterministic_policy).cpu().numpy()
+            Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
             arduino.Q1(Q1); arduino.Q2(Q2)
 
-            time.sleep(dt)                    # dt 초 대기 
-            next_T1, next_T2 = arduino.T1, arduino.T2
-            
-            if args.reward_type == 1:               # 현재 오차
-                err1 = Tsp1[k] - T1
-                err2 = Tsp2[k] - T2
-            else:                                   # 다음 오차 (default=2)
-                if k < steps - 1:
-                    err1 = Tsp1[k + 1] - next_T1
-                    err2 = Tsp2[k + 1] - next_T2
-                else:
-                    err1 = Tsp1[k] - next_T1
-                    err2 = Tsp2[k] - next_T2
-            reward = compute_reward(err1, err2, reward_scaler)
-            done   = (k == steps - 1)
+            # ---------- dt 대기 ----------
+            time.sleep(max(0.0, dt - (time.time() - loop_start)))
 
+            # ── 1-step next 관측 ─────────────────────────
+            next_T1, next_T2 = arduino.T1, arduino.T2
             next_obs = np.array(
                 [next_T1, next_T2,
-                Tsp1[min(k + 1, steps - 1)],
-                Tsp2[min(k + 1, steps - 1)]],
+                 Tsp1[min(k+1, steps-1)], Tsp2[min(k+1, steps-1)]],
                 dtype=np.float32
             )
 
-            buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
-            T1, T2 = next_T1, next_T2
+            # ---------- 큐 push ----------
+            obs_q.append(obs)
+            act_q.append([Q1, Q2])
+            tsp_q.append([Tsp1[k], Tsp2[k]])
+            temp_q.append([next_T1, next_T2])
+
+            # ── reward 계산 분기 ─────────────────────────
+            if args.reward_type in (1, 2):
+                # 기존 1-step 방식
+                if args.reward_type == 1:
+                    err1, err2 = Tsp1[k] - T1, Tsp2[k] - T2
+                else:  # 2
+                    err1, err2 = Tsp1[min(k+1, steps-1)] - next_T1, \
+                                 Tsp2[min(k+1, steps-1)] - next_T2
+                reward = compute_reward(err1, err2, reward_scaler)
+                done   = (k == steps-1)
+                buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
+
+            elif args.reward_type == 3:
+                # n-step: 큐가 충분히 쌓이면 pop & 계산
+                if len(obs_q) >= N:
+                    s_t      = obs_q.popleft()
+                    a_t      = act_q.popleft()
+                    tsp_now  = tsp_q.popleft()
+                    t_future = temp_q.popleft()     # N step 뒤 온도
+
+                    err1 = tsp_now[0] - t_future[0]
+                    err2 = tsp_now[1] - t_future[1]
+                    reward = compute_reward(err1, err2, reward_scaler)
+                    done   = (k >= steps-1)
+                    buffer.add_transition(s_t, a_t, next_obs, reward, done)
+            else:
+                raise ValueError("reward_type must be 1, 2, or 3")
+
         arduino.Q1(0); arduino.Q2(0)
 
 
-def rollout_simulator(policy, buffer, reward_scaler, args):
-    from src.eval_policy import generate_random_tsp
-    from tclab import setup
+from collections import deque
 
+def rollout_simulator(policy, buffer, reward_scaler, args):
+    from tclab import setup
     lab = setup(connected=False)
     env = lab(synced=False)
     env.Q1(0); env.Q2(0)
     env._T1 = env._T2 = args.ambient
 
     steps = int(args.max_episode_steps / args.sample_interval)
-    Tsp1 = generate_random_tsp(args.max_episode_steps, args.sample_interval)
-    Tsp2 = generate_random_tsp(args.max_episode_steps, args.sample_interval)
 
-    T1, T2 = env.T1, env.T2
+    # 동일 TSP 사용
+    Tsp1 = generate_random_tsp1(args.max_episode_steps, args.sample_interval)
+    Tsp2 = generate_random_tsp1(args.max_episode_steps, args.sample_interval)
+
     policy.eval()
 
+    # ---------- n-step 큐 (reward_type == 3 용) ----------
+    N   = getattr(args, "n_step", 5)              # 기본 5-step
+    obs_q, act_q, tsp_q, temp_q = deque(), deque(), deque(), deque()
+
     for k in trange(steps, desc="rollout"):
-        ### 
-        env.update(t=k*args.sample_interval)
-        #### 
+        env.update(t=k * args.sample_interval)
+        T1, T2 = env.T1, env.T2
+
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
-            action = policy.act(torchify(obs), deterministic=args.deterministic_policy).cpu().numpy()
-
-        
-        Q1 = float(np.clip(action[0], 0, 100))
-        Q2 = float(np.clip(action[1], 0, 100))
-        print(f"😀 Q1 가열율 : {Q1}, Q2 가열율 : {Q2}" )
+            act = policy.act(torchify(obs),
+                             deterministic=args.deterministic_policy).cpu().numpy()
+        Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
         env.Q1(Q1); env.Q2(Q2)
 
+        # 1-step next 관측
         env.update(t=(k + 1) * args.sample_interval)
         next_T1, next_T2 = env.T1, env.T2
-
-    
-        if args.reward_type == 1:
-            err1 = Tsp1[k] - T1
-            err2 = Tsp2[k] - T2
-        else:
-            if k < steps - 1:
-                err1 = Tsp1[k + 1] - next_T1
-                err2 = Tsp2[k + 1] - next_T2
-            else:
-                err1 = Tsp1[k] - next_T1
-                err2 = Tsp2[k] - next_T2
-        reward = compute_reward(err1, err2, reward_scaler)
-        done   = (k == steps - 1)
         next_obs = np.array(
             [next_T1, next_T2,
-            Tsp1[min(k + 1, steps - 1)],
-            Tsp2[min(k + 1, steps - 1)]],
+             Tsp1[min(k+1, steps-1)], Tsp2[min(k+1, steps-1)]],
             dtype=np.float32
         )
 
-        ### 버퍼에 추가하기 
-        buffer.add_transition(obs, [Q1,Q2],next_obs, reward, done)
+        # ────────────────────────────────
+        # reward_type == 1 | 2 : 즉시 계산
+        # reward_type == 3 :  n-step 큐 이용
+        # ────────────────────────────────
+        if args.reward_type == 1:
+            err1, err2 = Tsp1[k]                 - T1, \
+                         Tsp2[k]                 - T2
+            reward = compute_reward(err1, err2, reward_scaler)
+            done   = (k == steps - 1)
+            buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
 
-        T1, T2 = next_T1, next_T2
+        elif args.reward_type == 2:
+            err1, err2 = Tsp1[min(k+1, steps-1)] - next_T1, \
+                         Tsp2[min(k+1, steps-1)] - next_T2
+            reward = compute_reward(err1, err2, reward_scaler)
+            done   = (k == steps - 1)
+            buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
+
+        elif args.reward_type == 3:
+            # 큐에 push
+            obs_q.append(obs);   act_q.append([Q1, Q2])
+            tsp_q.append([Tsp1[k], Tsp2[k]])
+            temp_q.append([next_T1, next_T2])
+
+            # n-step reward가 준비되면 pop & 저장
+            if len(obs_q) >= N:
+                s_t      = obs_q.popleft()
+                a_t      = act_q.popleft()
+                tsp_now  = tsp_q.popleft()
+                t_future = temp_q.popleft()          # N-step 뒤 온도
+
+                err1 = tsp_now[0] - t_future[0]
+                err2 = tsp_now[1] - t_future[1]
+                reward = compute_reward(err1, err2, reward_scaler)
+                done   = (k >= steps - 1)            # 마지막 pop 판별
+                buffer.add_transition(s_t, a_t, next_obs, reward, done)
+        else:
+            raise ValueError("reward_type must be 1, 2, or 3")
+
+    env.Q1(0); env.Q2(0)
+
 
 
 def online_finetune(args):
@@ -268,21 +315,6 @@ def online_finetune(args):
         id=wandb_id or wandb.util.generate_id(),
         resume="allow"
     )
-
-    # buffer = {
-    #     "observations": [],
-    #     "actions": [],
-    #     "next_observations": [],
-    #     "rewards": [],
-    #     "terminals": []
-    # }
-
-    # if args.init_buffer : 
-    #     npz = np.load(args.init_buffer)
-    #     for k in buffer.keys():
-    #         buffer[k] = npz[k].tolist()
-    #     print(f"Pre-loaded buffer from {args.init_buffer}"
-    #           f"(size : {len(buffer['observations'])})")
     
     if args.init_buffer : 
         buffer.load(args.init_buffer)
