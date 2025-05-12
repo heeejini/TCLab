@@ -139,7 +139,7 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
             obs_q.append(obs)
             act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
-            temp_q.append([next_T1, next_T2])
+            temp_q.append([Tsp1[k], Tsp2[k]])
 
             # ── reward 계산 분기 ─────────────────────────
             if args.reward_type in (1, 2):
@@ -158,8 +158,8 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
                 if len(obs_q) >= N:
                     s_t      = obs_q.popleft()
                     a_t      = act_q.popleft()
-                    tsp_now  = tsp_q.popleft()
-                    t_future = temp_q.popleft()     # N step 뒤 온도
+                    tsp_now  = tsp_q.popleft() 
+                    t_future = temp_q.pop()      # N step 뒤 온도
 
                     err1 = tsp_now[0] - t_future[0]
                     err2 = tsp_now[1] - t_future[1]
@@ -235,14 +235,14 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
             # 큐에 push
             obs_q.append(obs);   act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
-            temp_q.append([next_T1, next_T2])
+            temp_q.append([Tsp1[k], Tsp2[k]])
 
             # n-step reward가 준비되면 pop & 저장
             if len(obs_q) >= N:
                 s_t      = obs_q.popleft()
                 a_t      = act_q.popleft()
                 tsp_now  = tsp_q.popleft()
-                t_future = temp_q.popleft()          # N-step 뒤 온도
+                t_future = temp_q.pop()          # N-step 뒤 온도
 
                 err1 = tsp_now[0] - t_future[0]
                 err2 = tsp_now[1] - t_future[1]

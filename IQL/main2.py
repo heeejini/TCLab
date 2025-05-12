@@ -16,9 +16,6 @@ from src.util import (return_range, set_seed, Log, sample_batch, torchify,
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
-# --------------------------------------------------------------------------- #
-# 데이터 로딩 유틸
-# --------------------------------------------------------------------------- #
 def get_env_and_dataset(log, npz_path, max_episode_steps=None):
     log(f"Loading offline dataset from {npz_path}")
     print(f"Loading offline dataset from {npz_path}")
@@ -30,10 +27,6 @@ def get_env_and_dataset(log, npz_path, max_episode_steps=None):
         log(f"  {k:17s} shape={tuple(v.shape)} dtype={v.dtype}")
     return None, dataset
 
-
-# --------------------------------------------------------------------------- #
-# 옵티마이저 팩토리
-# --------------------------------------------------------------------------- #
 def build_optimizer_factory(args):
     if args.sam:  # Sharpness-Aware Minimization
         return lambda params: SAM(
@@ -49,14 +42,9 @@ def build_optimizer_factory(args):
             lr=args.learning_rate,
         )
 
-
-# --------------------------------------------------------------------------- #
-# 메인
-# --------------------------------------------------------------------------- #
 def main(args):
     torch.set_num_threads(1)
 
-    # wandb 세팅
     wandb.init(
         project="tclab-project1",
         name=args.exp_name,
@@ -64,18 +52,18 @@ def main(args):
         config=vars(args),
     )
 
-    # 로그 객체
+
     log = Log(Path(args.log_dir) / args.env_name, vars(args))
     log(f"Log dir: {log.dir}")
 
-    # 환경 & 데이터
+
     env, dataset = get_env_and_dataset(log, args.npz_path, args.max_episode_steps)
     obs_dim = dataset["observations"].shape[1]
     act_dim = dataset["actions"].shape[1]
 
     set_seed(args.seed, env=env)
 
-    # 정책
+
     if args.deterministic_policy:
         policy = DeterministicPolicy(
             obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden
@@ -85,14 +73,13 @@ def main(args):
             obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden
         )
 
-    # 평가 함수
+
     def eval_policy(policy, args):
         if args.method == "simulator":
             return evaluate_policy_sim(policy, args)
         elif args.method == "real":
             return evaluate_policy_tclab(policy, args)
 
-    # IQL
     optimizer_factory = build_optimizer_factory(args)
     iql = ImplicitQLearning(
         qf=TwinQ(
@@ -115,7 +102,6 @@ def main(args):
         discount=args.discount,
     )
 
-    # Advantage 디버깅
     with torch.no_grad():
         obs = dataset["observations"][:5000]
         act = dataset["actions"][:5000]
@@ -127,7 +113,7 @@ def main(args):
         adv.std().item(),
     )
 
-    # best 값들 (Early-stopping용)
+
     best_total_error = float("inf")
     best_total_return = -float("inf")
     best_q_loss = float("inf")
@@ -135,18 +121,17 @@ def main(args):
     best_policy_loss = float("inf")
     best_step = -1
 
-    # Early-stopping 파라미터
+
     patience = 6
     min_delta_err = 0.5
     min_delta_ret = 1.0
     no_improve_cnt = 0
     stop_step = None
 
-    # ------------------------------- 학습 루프 ------------------------------- #
+
     for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
 
-        # 디버깅 출력
         if (step + 1) % 5_000 == 0:
             with torch.no_grad():
                 test_obs = dataset["observations"][:5000]
@@ -168,7 +153,6 @@ def main(args):
                 f"{test_act.min():.3f}  ~  {test_act.max():.3f}"
             )
 
-        # 주기적 평가
         if (step + 1) % args.eval_period == 0:
             metrics = eval_policy(iql.policy, args)
             metrics.update({"step": step + 1})
@@ -176,7 +160,6 @@ def main(args):
             full_log = loss_dict.copy()
             full_log.update(metrics)
 
-            # 텐서/배열 → float 변환
             for k, v in full_log.items():
                 if isinstance(v, torch.Tensor):
                     full_log[k] = v.item() if v.numel() == 1 else float(v.mean().item())
@@ -185,7 +168,6 @@ def main(args):
                 elif not isinstance(v, (int, float)):
                     full_log[k] = str(v)
 
-            # total_error 계산
             try:
                 total_error = (
                     full_log["E1"]
@@ -197,7 +179,6 @@ def main(args):
                 total_error = np.inf
             full_log["total_error"] = total_error
 
-            # 콘솔 출력
             print(f"\n[Step {step+1}] Evaluation:")
             for k, v in full_log.items():
                 if isinstance(v, float):
@@ -208,7 +189,6 @@ def main(args):
             prev_best_error = best_total_error
             prev_best_return = best_total_return
 
-            # 모델 저장
             if total_error < best_total_error:
                 best_total_error = total_error
                 best_step = step + 1
@@ -234,7 +214,6 @@ def main(args):
             log.row(full_log)
             wandb.log(full_log)
             
-            # early-stopping 체크
             improved = False
             if (prev_best_error - total_error) > min_delta_err:
                 improved = True
@@ -251,7 +230,6 @@ def main(args):
                 print(f"\nEarly-Stopping triggered at step {stop_step} !")
                 break
 
-    # --------------------- 학습 종료 후: 모델 저장 --------------------- #
     torch.save(iql.state_dict(), log.dir / "final.pt")
     if stop_step is not None:
         with open(log.dir / "early_stop.txt", "w") as f:
@@ -268,7 +246,6 @@ def main(args):
         f.write(f"Best V Loss: {best_v_loss:.3f}\n")
         f.write(f"Best Policy Loss: {best_policy_loss:.3f}\n")
 
-    # ---------------------- Extra evaluation (seed 2/3/4) ---------------------- #
     if args.eval_seeds:
         print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
 
@@ -282,7 +259,7 @@ def main(args):
                         metrics["Over"] + metrics["Under"])
             metrics.update({"total_error": total_error, "seed": s})
 
-            # 콘솔 출력
+
             print(f"\n  Seed {s}:")
             print(f"    total_return = {metrics['total_return']:.3f}")
             print(f"    total_error  = {metrics['total_error']:.3f}")
@@ -291,7 +268,6 @@ def main(args):
             log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
             wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
 
-        # --- 모든 시드 수집 후 Table 한 번 생성 ---
         tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
         for r in extra_rows:
             tbl.add_data(r["seed"], r["total_error"], r["total_return"])
@@ -300,7 +276,7 @@ def main(args):
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
 
-        # 요청: avg_error 값을 total_error 로 간주
+
         avg_metrics = {
             "seed": "avg",
             "total_return": avg_return,
@@ -315,7 +291,6 @@ def main(args):
         wandb.log({"extra_avg_total_return": avg_return, "extra_avg_total_error": avg_error})
         log.row(avg_metrics)
 
-        # CSV 저장
         import csv
 
         csv_path = log.dir / "extra_eval.csv"
@@ -327,14 +302,9 @@ def main(args):
             writer.writerow(avg_metrics)
         print(f"✅ Extra-evaluation results saved to {csv_path}")
 
-    # ----------------------------------------------------------------------- #
     wandb.finish()
     log.close()
 
-
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     from argparse import ArgumentParser
 
@@ -357,34 +327,29 @@ if __name__ == "__main__":
         "--stochastic-policy", action="store_false", dest="deterministic_policy"
     )
 
-    # 평가 주기
     parser.add_argument("--eval-period", type=int, default=5000)
     parser.add_argument("--n-eval-episodes", type=int, default=10)
     parser.add_argument("--max-episode-steps", type=int, default=1200)
     parser.add_argument("--sample_interval", type=float, default=5.0)
 
-    # 경로
     parser.add_argument("--exp_name", default="iql_default")
     
-    #first_reward / next_reward_scaler
-    parser.add_argument("--npz-path", default="C:/Users/User/tclab1/Data/first_reward.npz")
-    parser.add_argument("--scaler", default="C:/Users/User/tclab1/Data/first_reward.pkl")
+    parser.add_argument("--npz-path", default="C:/Users/Developer/TCLab/Data/future.npz")
+    parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/future.pkl")
 
-    # SAM
     parser.add_argument("--sam", action="store_true", help="Sharpness-Aware Minimization 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.03, help="SAM perturbation half-width (ρ)")
 
-    # 평가 방식
     parser.add_argument("--method", default="simulator")
     parser.add_argument("--reward_type", type=int, default=1)
 
-    # 📌 추가: extra evaluation seeds
     parser.add_argument(
         "--eval-seeds",
         nargs="*",
         type=int,
-        default=None,
-        help="추가 평가용 random seed 목록 (예: --eval-seeds 1 2 3 )",
+        default=[0, 1, 2],
+        help="추가 평가용 random seed 목록 (예: --eval-seeds 0 1 2 )",
     )
+
 
     main(parser.parse_args())
