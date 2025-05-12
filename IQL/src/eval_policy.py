@@ -23,6 +23,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from tqdm import trange
+from collections import deque
 
 from tclab import setup, TCLab  # 시뮬레이터 & 실제
 
@@ -285,7 +286,7 @@ def tclab_policy(
             elif reward_type == 3: 
                 # n step 미래 T가 준비됐을 떄만 reward 계산 . 
                 if len(future_q) == n_step + 1 :
-                    T_future1, T_future2 = future_q[0]
+                    T_future1, T_future2 = future_q.popleft()
                     err1 = Tsp1[k-n_step] - T_future1 
                     err2 = Tsp2[k-n_step] - T_future2
                 else : 
