@@ -112,7 +112,7 @@ def simulator_policy(
     ambient: float = 29.0, # start_temp 
     deterministic: bool = True, 
     scaler : str| Path = '',
-    reward_type : int = 2
+    reward_type : int = 3
 ):
     from .util import torchify, set_seed
     steps = int(total_time_sec/dt)
@@ -175,6 +175,15 @@ def simulator_policy(
             else:
                 err1 = Tsp1[k] - next_T1
                 err2 = Tsp2[k] - next_T2
+        elif reward_type == 3:
+            # n-step future 기준: TSP_t - T_{t+n}
+            n = 5  
+            j = min(k + n, steps - 1)
+            env.update(t=j * dt)  # t+n 시점까지 환경 갱신
+            future_T1, future_T2 = env.T1, env.T2
+            err1 = Tsp1[k] - future_T1
+            err2 = Tsp2[k] - future_T2
+                    
         else:
             raise ValueError(f"Invalid reward_type: {reward_type} (must be 1 or 2)")
 
@@ -219,7 +228,7 @@ def tclab_policy(
     from .util import torchify, set_seed
     steps = int(total_time_sec / dt)
     set_seed(seed)
-
+    n_step = 5
     run_dir = Path(log_root) / f"real_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -243,6 +252,9 @@ def tclab_policy(
         total_ret = e1 = e2 = over = under = 0.0
         policy.eval()
 
+        if reward_type == 3:
+            future_q = deque(maxlen=n_step+1)   # (T1,T2) 최근 n+1개
+            
         for k in trange(steps, desc="real"):
             loop_start = time.time()
 
@@ -259,14 +271,25 @@ def tclab_policy(
 
             time.sleep(max(0.0, dt - (time.time() - loop_start)))
 
-            # next observation
-            next_T1, next_T2 = arduino.T1, arduino.T2
+            if reward_type == 3:
+                future_q.append((T1[k], T2[k]))   # 현재 T 저장
 
+            # ── 행동 실행 후 next 관측 읽기 ───────────────────────
+            time.sleep(max(0.0, dt - (time.time() - loop_start)))
+            next_T1, next_T2 = arduino.T1, arduino.T2
             # 리워드 계산 기준 분기
             if reward_type == 1:
                 err1, err2 = Tsp1[k] - T1[k], Tsp2[k] - T2[k]
             elif reward_type == 2 and k < steps - 1:
                 err1, err2 = Tsp1[k + 1] - next_T1, Tsp2[k + 1] - next_T2
+            elif reward_type == 3: 
+                # n step 미래 T가 준비됐을 떄만 reward 계산 . 
+                if len(future_q) == n_step + 1 :
+                    T_future1, T_future2 = future_q[0]
+                    err1 = Tsp1[k-n_step] - T_future1 
+                    err2 = Tsp2[k-n_step] - T_future2
+                else : 
+                    err1 = err2 = 0.0 #큐가 아직 부족할 땐 reward 0 
             else:
                 err1, err2 = 0.0, 0.0  # 마지막 step은 reward 없음
 
