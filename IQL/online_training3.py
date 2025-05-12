@@ -139,7 +139,7 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
             obs_q.append(obs)
             act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
-            temp_q.append([Tsp1[k], Tsp2[k]])
+            temp_q.append([T1, T2])
 
             # ── reward 계산 분기 ─────────────────────────
             if args.reward_type in (1, 2):
@@ -235,7 +235,7 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
             # 큐에 push
             obs_q.append(obs);   act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
-            temp_q.append([Tsp1[k], Tsp2[k]])
+            temp_q.append([T1, T2])
 
             # n-step reward가 준비되면 pop & 저장
             if len(obs_q) >= N:
