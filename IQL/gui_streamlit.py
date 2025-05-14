@@ -49,7 +49,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-st.title("🌡️ TCLab IQL 실시간 제어 대시보드")
+st.title("🌡️ TCLab IQL 제어")
 
 # 사용자 입력
 col1, col2 = st.columns(2)
