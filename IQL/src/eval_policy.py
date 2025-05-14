@@ -52,9 +52,11 @@ reward_scaler = StandardScaler()
 def compute_reward(acc_error1, acc_error2, reward_scaler):
     raw_reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
     #reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
-    scaled = reward_scaler.transform([[raw_reward]])[0][0]
-    return scaled
-
+  #  scaled = reward_scaler.transform([[raw_reward]])[0][0]
+    return raw_reward
+import numpy as np
+from tclab import TCLab
+from src.mpc_lib import mpc, mpc_init
 
 # def compute_reward(acc_error1, acc_error2, time_sec: float, reward_scaler):
 
@@ -65,40 +67,172 @@ def compute_reward(acc_error1, acc_error2, reward_scaler):
 #     scaled = reward_scaler.transform([[raw_reward]])[0][0]
 #     return scaled
 
-def generate_random_tsp(total_time_sec : int = 1200,                   
-                        dt: float          = 5.0,      # sample / control interval
-                        low: float         = 25.0,
-                        high: float        = 65.0,
-                        verbose: bool      = False,) -> np.ndarray:
+# def generate_random_tsp(length, dt: float          = 5.0,      # sample / control interval
+#                         low: float         = 25.0,
+#                         high: float        = 65.0,
+#                         verbose: bool      = False,):
+#     i = 0
+#     tsp = np.zeros(length)
+#     #print(f'duration {length}: [{name} 설정 정보]')
+#     while i < length:
+#         if length == 600: 
+#             duration = int(np.clip(np.random.normal(240, 50), 80, 400))
+#         elif length == 900:
+#             duration = int(np.clip(np.random.normal(360, 75), 120, 600))
+#         elif length == 1200:
+#             duration = int(np.clip(np.random.normal(480, 100), 160, 800))
+#         else:
+#             duration = 5
+#         temp = np.random.uniform(25, 65)
+#         end = min(i + duration, length)
+#         tsp[i:end] = temp
+#         #print("@@@@@@@@@@@@@@@@")
+#         #print(f'  구간: {i:>3} ~ {end - 1:>3}, 목표 온도: {temp:.2f}°C')
+#         i = end
+#     return tsp
+
+# def generate_random_tsp(total_time_sec : int = 1200,                   
+#                         dt: float          = 5.0,      # sample / control interval
+#                         low: float         = 25.0,
+#                         high: float        = 65.0,
+#                         verbose: bool      = False,) -> np.ndarray:
+#     """
+#     Set-point 구간별 정보를 로그로 출력.
+#     각 구간 길이: 평균 480초, σ 100초, 최소 160초, 최대 800초
+#     """
+#     # 시간 관련 변수 
+#     n_steps = int(total_time_sec/ dt)
+#     tsp = np.zeros(n_steps)
+#     i = 0
+#     seg_id = 1  # 구간 번호
+
+#     print(f"\n--- Set-point 프로파일 생성 (총 시간: {total_time_sec}초, 총 step: {n_steps}) ---")
+#     while i < n_steps:
+#         dur_sec = int(np.clip(np.random.normal(480, 100), 160, 800))
+#         dur_steps = max(1, int(dur_sec / dt))
+#         end = min(i + dur_steps, n_steps)
+    
+#         # set-point 값 설정
+#         temp = round(np.random.uniform(low, high), 2)
+#         tsp[i:end] = temp
+    
+#         # 로그 출력
+#         start_time = int(i * dt)
+#         end_time = int((end - 1) * dt)
+#         print(f"구간 {seg_id}: step {i:>3} ~ {end-1:>3} (시간 {start_time:>4}s ~ {end_time:>4}s) → 목표 온도: {temp:.2f}°C")
+    
+#         i = end
+#         seg_id += 1
+#     print("-----------------------------------------------------------\n")
+#     return tsp
+def generate_random_tsp(
+    total_time_sec: int = 1200,
+    dt: float = 5.0,
+    low: float = 25.0,
+    high: float = 65.0,
+    verbose: bool = False,
+) -> np.ndarray:
     """
-    Set-point 구간별 정보를 로그로 출력.
-    각 구간 길이: 평균 480초, σ 100초, 최소 160초, 최대 800초
+    TSP 시퀀스 생성 함수 (기존 1번 함수와 구조/분포 동일하게 맞춤)
+
+    duration 분포는 total_time_sec에 따라 다르게 설정:
+    - 600 → N(240, 50)
+    - 900 → N(360, 75)
+    - 1200 → N(480, 100)
     """
-    # 시간 관련 변수 
-    n_steps = int(total_time_sec/ dt)
+    n_steps = int(total_time_sec / dt)
     tsp = np.zeros(n_steps)
     i = 0
-    seg_id = 1  # 구간 번호
+    seg_id = 1
 
-    print(f"\n--- Set-point 프로파일 생성 (총 시간: {total_time_sec}초, 총 step: {n_steps}) ---")
+    # duration 분포 결정 (1번 함수 따라감)
+    if total_time_sec == 600:
+        mean_dur, std_dur, min_dur, max_dur = 240, 50, 80, 400
+    elif total_time_sec == 900:
+        mean_dur, std_dur, min_dur, max_dur = 360, 75, 120, 600
+    else:
+        mean_dur, std_dur, min_dur, max_dur = 480, 100, 160, 800
+
+    if verbose:
+        print(f"--- Set-point 프로파일 생성 (총 시간: {total_time_sec}초, 총 step: {n_steps}) ---")
+
     while i < n_steps:
-        dur_sec = int(np.clip(np.random.normal(480, 100), 160, 800))
-        dur_steps = max(1, int(dur_sec / dt))
+        duration = int(np.clip(np.random.normal(mean_dur, std_dur), min_dur, max_dur))
+        dur_steps = max(1, int(duration / dt))  # 초 단위 → step 단위 변환
         end = min(i + dur_steps, n_steps)
-    
-        # set-point 값 설정
+
         temp = round(np.random.uniform(low, high), 2)
         tsp[i:end] = temp
-    
-        # 로그 출력
-        start_time = int(i * dt)
-        end_time = int((end - 1) * dt)
-        print(f"구간 {seg_id}: step {i:>3} ~ {end-1:>3} (시간 {start_time:>4}s ~ {end_time:>4}s) → 목표 온도: {temp:.2f}°C")
-    
+
+        if verbose:
+            start_time = int(i * dt)
+            end_time = int((end - 1) * dt)
+            print(f"구간 {seg_id}: step {i:>3} ~ {end-1:>3} (시간 {start_time:>4}s ~ {end_time:>4}s) → 목표 온도: {temp:.2f}°C")
+
         i = end
         seg_id += 1
-    print("-----------------------------------------------------------\n")
+
+    if verbose:
+        print("-----------------------------------------------------------\n")
+
     return tsp
+
+
+def simulate_mpc_episode(seed, args):
+    
+    from .util import torchify, set_seed
+    # 1) 재현성
+    set_seed(seed)
+    np.random.seed(seed)
+
+    steps = int(args.max_episode_steps / args.sample_interval)
+    dt    = args.sample_interval
+
+    # 2) 데이터 버퍼
+    T1 = np.zeros(steps);  T2 = np.zeros(steps)
+    Q1 = np.zeros(steps);  Q2 = np.zeros(steps)
+
+    Tsp1 = generate_random_tsp(args.max_episode_steps, dt)
+    Tsp2 = generate_random_tsp(args.max_episode_steps, dt)
+
+    # 3) 시뮬레이터 인스턴스
+    lab = setup(connected=False)
+    env = lab()                 # TCLabModel 객체
+    env.T_amb = args.ambient
+    env.Q1 = 0; env.Q2 = 0      # 초기화
+
+    mpc_init()
+
+    total_ret = e1 = e2 = over = under = 0.0
+
+    for k in range(steps):
+        # 현재 온도 읽기
+        T1[k] = env.T1
+        T2[k] = env.T2
+
+        # ﻿누적 오차
+        err1 = Tsp1[k] - T1[k]
+        err2 = Tsp2[k] - T2[k]
+        e1  += abs(err1);  e2 += abs(err2)
+        over += max(0, -err1) + max(0, -err2)
+        under+= max(0,  err1) + max(0,  err2)
+        total_ret += -np.hypot(err1, err2)
+
+        # MPC 제어 --> 히터 설정
+        q1, q2 = mpc(T1[k], Tsp1[k], T2[k], Tsp2[k])
+        Q1[k] = q1;  env.Q1 = q1
+        Q2[k] = q2;  env.Q2 = q2
+
+        # 시뮬레이터 한 스텝 진행
+        env.update(dt)
+
+    return dict(
+        T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2,
+        Q1=Q1, Q2=Q2,
+        total_return=total_ret,
+        E1=e1, E2=e2, Over=over, Under=under,
+    )
+
 
 # ────────────────────────────────
 # 1) 시뮬레이터 평가 함수
@@ -107,7 +241,7 @@ def generate_random_tsp(total_time_sec : int = 1200,
 def simulator_policy(
     policy,
     total_time_sec: int = 1200,
-    dt: float = 5.0,
+    dt: float = 5,
     log_root: str | Path = "./eval_sim_logs",
     seed: int = 0,
     ambient: float = 29.0, # start_temp 
