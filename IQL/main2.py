@@ -321,7 +321,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--alpha", type=float, default=0.005)
-    parser.add_argument("--tau", type=float, default=0.8)
+    parser.add_argument("--tau", type=float, default=0.99)
     parser.add_argument("--beta", type=float, default=3.0)
     parser.add_argument(
         "--stochastic-policy", action="store_false", dest="deterministic_policy"
@@ -333,7 +333,9 @@ if __name__ == "__main__":
     parser.add_argument("--sample_interval", type=float, default=5.0)
 
     parser.add_argument("--exp_name", default="iql_default")
-    
+    # future_10step
+    # C:\Users\Developer\TCLab\Data\first_reward.pkl
+    # C:\Users\Developer\TCLab\Data\first_reward.npz
     parser.add_argument("--npz-path", default="C:/Users/Developer/TCLab/Data/future.npz")
     parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/future.pkl")
 
@@ -341,7 +343,7 @@ if __name__ == "__main__":
     parser.add_argument("--sam-rho", type=float, default=0.03, help="SAM perturbation half-width (ρ)")
 
     parser.add_argument("--method", default="simulator")
-    parser.add_argument("--reward_type", type=int, default=1)
+    parser.add_argument("--reward_type", type=int, default=3)
 
     parser.add_argument(
         "--eval-seeds",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Dict
-
+import csv
 import numpy as np
 import torch
 import pandas as pd
@@ -98,40 +98,40 @@ def run_inference_multiple_seeds(args: argparse.Namespace):
     policy = iql.policy
     args.scaler = args.scaler_path
 
-    all_results = []
+    # all_results = []
 
-    for tsp_seed in args.epi_gen_seeds:
-        tmp_args = argparse.Namespace(**vars(args))
-        tmp_args.seed = tsp_seed
+    # for tsp_seed in args.epi_gen_seeds:
+    #     tmp_args = argparse.Namespace(**vars(args))
+    #     tmp_args.seed = tsp_seed
 
-        if args.method == "simulator":
-            result = evaluate_policy_sim(policy, tmp_args)
-        elif args.method == "real":
-            result = evaluate_policy_tclab(policy, tmp_args)
-        else:
-            raise ValueError(f"Unknown method: {args.method}")
+    #     if args.method == "simulator":
+    #         result = evaluate_policy_sim(policy, tmp_args)
+    #     elif args.method == "real":
+    #         result = evaluate_policy_tclab(policy, tmp_args)
+    #     else:
+    #         raise ValueError(f"Unknown method: {args.method}")
 
-        result.update({"tsp_seed": tsp_seed})
-        all_results.append(result)
+    #     result.update({"tsp_seed": tsp_seed})
+    #     all_results.append(result)
 
-        seed_dir = args.log_dir / f"seed{tsp_seed}"
-        seed_dir.mkdir(parents=True, exist_ok=True)
-        plot_single_rollout(result, save_path=seed_dir / "rollout.png", dt=args.sample_interval)
+    #     seed_dir = args.log_dir / f"seed{tsp_seed}"
+    #     seed_dir.mkdir(parents=True, exist_ok=True)
+    #     plot_single_rollout(result, save_path=seed_dir / "rollout.png", dt=args.sample_interval)
 
-    plot_average_rollout(all_results, save_path=args.log_dir / "avg_rollout.png", dt=args.sample_interval)
+    # plot_average_rollout(all_results, save_path=args.log_dir / "avg_rollout.png", dt=args.sample_interval)
 
-    df = pd.DataFrame(all_results)
-    summary = df[["E1", "E2", "Over", "Under", "total_return"]].mean()
+    # df = pd.DataFrame(all_results)
+    # summary = df[["E1", "E2", "Over", "Under", "total_return"]].mean()
 
-        # wandb 로깅
-    wandb.log({f"IQL/{k}": v for k, v in summary.items()})
+    #     # wandb 로깅
+    # wandb.log({f"IQL/{k}": v for k, v in summary.items()})
 
 
-    print("\n──────── Evaluation Summary (Averaged over TSP seeds) ────────")
-    print(summary)
-    print("────────────────────────────────────────────────────────────")
+    # print("\n──────── Evaluation Summary (Averaged over TSP seeds) ────────")
+    # print(summary)
+    # print("────────────────────────────────────────────────────────────")
 
-    df.to_csv(args.log_dir / "inference_summary.csv", index=False)
+    #df.to_csv(args.log_dir / "inference_summary.csv", index=False)
 
     print("\n🔍 Running MPC evaluation for the same seeds...")
     mpc_results = []
@@ -147,7 +147,23 @@ def run_inference_multiple_seeds(args: argparse.Namespace):
         seed_dir = args.log_dir / f"mpc_seed{seed}"
         seed_dir.mkdir(parents=True, exist_ok=True)
         plot_single_rollout(mpc_result, save_path=seed_dir / "rollout.png", dt=args.sample_interval)
-
+        
+                # ✅ CSV 저장
+        csv_path = seed_dir / "rollout.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["time", "T1", "T2", "Q1", "Q2", "TSP1", "TSP2"])
+            t = np.arange(len(mpc_result["T1"])) * args.sample_interval
+            for i in range(len(t)):
+                writer.writerow([
+                    t[i],
+                    mpc_result["T1"][i],
+                    mpc_result["T2"][i],
+                    mpc_result["Q1"][i],
+                    mpc_result["Q2"][i],
+                    mpc_result["Tsp1"][i],
+                    mpc_result["Tsp2"][i],
+                ])
     mpc_df = pd.DataFrame(mpc_results)
     mpc_df.to_csv(args.log_dir / "mpc_summary.csv", index=False)
 
@@ -186,14 +202,14 @@ def main():
     parser.add_argument('--pt-path', default="C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/online_directional_override_act_err_thr1.0_05-12-1740/05-12-25_17.40.25_kdyy/best.pt")
     #parser.add_argument('--pt-path', default="C:/Users/Developer/TCLab/IQL/sam/tclab-mpc-iql/05-12-25_10.45.27_eemw/best.pt")
     parser.add_argument("--scaler-path", default="C:/Users/Developer/TCLab/Data/future.pkl")
-    parser.add_argument("--log-dir", type=Path, default=Path("./inference_results_online_realkit"))
+    parser.add_argument("--log-dir", type=Path, default=Path("./inference_results_online_simul"))
     parser.add_argument("--method", choices=["simulator", "real"], default="simulator")
     parser.add_argument("--epi-gen-seeds", type=int, nargs="*", default=[0, 1, 2, 3, 4])
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--n-hidden", type=int, default=2)
     parser.add_argument("--deterministic-policy", action="store_true")
     parser.add_argument("--max-episode-steps", type=int, default=1200)
-    parser.add_argument("--sample-interval", type=float, default=1.0)
+    parser.add_argument("--sample-interval", type=float, default=5.0)
     parser.add_argument("--reward-type", type=int, default=3)
     parser.add_argument("--ambient", type=float, default=29.0)
 

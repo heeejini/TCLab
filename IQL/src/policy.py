@@ -43,8 +43,8 @@ class GaussianPolicy(nn.Module):
         obs, 
         deterministic: bool = False,
         enable_grad: bool = False,
-        err_thr: float = 3,        # |Tsp−T| ≤ err_thr 일 때만 노이즈 추가
-        noise_std: float = 5.0       # 가우시안 노이즈 표준편차 (PWM %)
+        err_thr: float = 1.0,        # |Tsp−T| ≤ err_thr 일 때만 노이즈 추가
+        noise_std: float = 10.0       # 가우시안 노이즈 표준편차 (PWM %)
     ):
         """
         1 + 4 탐색 전략:
@@ -53,7 +53,7 @@ class GaussianPolicy(nn.Module):
         """
         with torch.set_grad_enabled(enable_grad):
             dist = self(obs)
-            print("obs shape:", obs.shape)
+        #    print("obs shape:", obs.shape)
             mean_action = dist.mean                      # [Q1_mean, Q2_mean]
 
             if deterministic:
@@ -83,7 +83,7 @@ class GaussianPolicy(nn.Module):
         obs: torch.Tensor,
         deterministic: bool = False,
         enable_grad: bool = False,
-        err_thr: float = 1.0
+        err_thr: float = 1
     ):
         """
         ε-greedy + directional override 기반 탐색 정책
@@ -95,35 +95,28 @@ class GaussianPolicy(nn.Module):
             if deterministic:
                 return torch.clamp(mean_action, 0.0, 100.0)
 
-            if random.random() < self.epsilon:
-                # 🔥 directional override 사용
-                print("🤑🤑🤑🤑🤑 입실론 그리디!!! ")
-                delta1 = obs[2] - obs[0]
-                delta2 = obs[3] - obs[1]
+            delta1 = obs[2] - obs[0]
+            delta2 = obs[3] - obs[1]
 
-                if delta1 > err_thr:
-                    Q1 = 100.0
-                    print(f"🔥 Q1 = 100 (delta1 = {delta1.item():.2f} > {err_thr})")
-                elif delta1 < -err_thr:
-                    Q1 = 0.0
-                    print(f"❄️ Q1 = 0 (delta1 = {delta1.item():.2f} < -{err_thr})")
-                else:
-                    Q1 = mean_action[0]
-                    print(f"✅ Q1 = mean ({Q1.item():.2f}) (|delta1| <= {err_thr})")
-
-                if delta2 > err_thr:
-                    Q2 = 100.0
-                    print(f"🔥 Q2 = 100 (delta2 = {delta2.item():.2f} > {err_thr})")
-                elif delta2 < -err_thr:
-                    Q2 = 0.0
-                    print(f"❄️ Q2 = 0 (delta2 = {delta2.item():.2f} < -{err_thr})")
-                else:
-                    Q2 = mean_action[1]
-                    print(f"✅ Q2 = mean ({Q2.item():.2f}) (|delta2| <= {err_thr})")
+            if delta1 > err_thr:
+                Q1 = 100.0
+                print(f"🔥 Q1 = 100 (delta1 = {delta1.item():.2f} > {err_thr})")
+            elif delta1 < -err_thr:
+                Q1 = 0.0
+                print(f"❄️ Q1 = 0 (delta1 = {delta1.item():.2f} < -{err_thr})")
             else:
-                # ✅ ε를 넘긴 경우는 그냥 평균 정책 사용
-                Q1, Q2 = mean_action[0], mean_action[1]
-                print(f"🎯 Q = policy mean ({Q1.item():.2f}, {Q2.item():.2f})")
+                Q1 = mean_action[0]
+                print(f"✅ Q1 = mean ({Q1.item():.2f}) (|delta1| <= {err_thr})")
+
+            if delta2 > err_thr:
+                Q2 = 100.0
+                print(f"🔥 Q2 = 100 (delta2 = {delta2.item():.2f} > {err_thr})")
+            elif delta2 < -err_thr:
+                Q2 = 0.0
+                print(f"❄️ Q2 = 0 (delta2 = {delta2.item():.2f} < -{err_thr})")
+            else:
+                Q2 = mean_action[1]
+                print(f"✅ Q2 = mean ({Q2.item():.2f}) (|delta2| <= {err_thr})")
 
             action = torch.tensor([Q1, Q2], device=obs.device)
             return torch.clamp(action, 0.0, 100.0)

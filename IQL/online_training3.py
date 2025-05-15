@@ -17,7 +17,6 @@ from src.eval_policy import compute_reward
 from collections import deque
 N_STEP_REWARD = 5
 
-
 def eval_policy( policy, args):
     if args.type == "simulator":
         return evaluate_policy_sim(policy, args)
@@ -25,10 +24,8 @@ def eval_policy( policy, args):
         return evaluate_policy_tclab(policy, args)
 
 
-
 def build_optimizer_factory(args):
     if args.sam:
-        # SAM( params, base_optimizer, **base_opt_kwargs, rho=... )
         return lambda params: SAM(params,
                                   torch.optim.Adam,
                                   lr=args.learning_rate,
@@ -80,7 +77,6 @@ from collections import deque           # ★ 추가
 
 def rollout_tclab(policy, buffer, reward_scaler, args):
     """
-    실제 USB-TCLab 장치에서 n-step 리워드까지 지원하는 rollout
       reward_type = 1 :  |TSP_t − T_t|
       reward_type = 2 :  |TSP_t − T_{t+1}|
       reward_type = 3 :  |TSP_t − T_{t+N}|   (N = args.n_step)
@@ -92,14 +88,12 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
 
     dt    = args.sample_interval
     steps = int(args.max_episode_steps / dt)
-    N     = getattr(args, "n_step", 5)          # 기본 5-step
+    N     = getattr(args, "n_step", 5)      
     ambient = 29.0
 
-    # ---------- set-point ----------
     Tsp1 = generate_random_tsp1(args.max_episode_steps, dt)
     Tsp2 = generate_random_tsp1(args.max_episode_steps, dt)
 
-    # ---------- 4개의 deque ----------
     obs_q, act_q, tsp_q, temp_q = deque(), deque(), deque(), deque()
 
     with TCLab() as arduino:
@@ -114,20 +108,17 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
         for k in trange(steps, desc="rollout-tclab"):
             loop_start = time.time()
 
-            # ── 현재 관측, 행동 ───────────────────────────
             T1, T2 = arduino.T1, arduino.T2
             obs    = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
 
             with torch.no_grad():
-                act = policy.act(torchify(obs),
+                act = policy.directional_override_act(torchify(obs),
                                  deterministic=args.deterministic_policy).cpu().numpy()
             Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
             arduino.Q1(Q1); arduino.Q2(Q2)
 
-            # ---------- dt 대기 ----------
             time.sleep(max(0.0, dt - (time.time() - loop_start)))
 
-            # ── 1-step next 관측 ─────────────────────────
             next_T1, next_T2 = arduino.T1, arduino.T2
             next_obs = np.array(
                 [next_T1, next_T2,
@@ -135,13 +126,11 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
                 dtype=np.float32
             )
 
-            # ---------- 큐 push ----------
             obs_q.append(obs)
             act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
             temp_q.append([T1, T2])
 
-            # ── reward 계산 분기 ─────────────────────────
             if args.reward_type in (1, 2):
                 # 기존 1-step 방식
                 if args.reward_type == 1:
@@ -189,8 +178,7 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 
     policy.eval()
 
-    # ---------- n-step 큐 (reward_type == 3 용) ----------
-    N   = getattr(args, "n_step", 5)              # 기본 5-step
+    N   = getattr(args, "n_step", 5)             
     obs_q, act_q, tsp_q, temp_q = deque(), deque(), deque(), deque()
 
     for k in trange(steps, desc="rollout"):
@@ -199,13 +187,14 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
+            # act / online_act / directional_override_act / error_act 
             act = policy.act(torchify(obs),
                              deterministic=args.deterministic_policy).cpu().numpy()
         Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
         env.Q1(Q1); env.Q2(Q2)
 
         # 1-step next 관측
-        env.update(t=(k + 1) * args.sample_interval)
+        env.update(t=(k + 1) * args.sample_interval) ####
         next_T1, next_T2 = env.T1, env.T2
         next_obs = np.array(
             [next_T1, next_T2,
@@ -213,10 +202,6 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
             dtype=np.float32
         )
 
-        # ────────────────────────────────
-        # reward_type == 1 | 2 : 즉시 계산
-        # reward_type == 3 :  n-step 큐 이용
-        # ────────────────────────────────
         if args.reward_type == 1:
             err1, err2 = Tsp1[k]                 - T1, \
                          Tsp2[k]                 - T2
@@ -232,17 +217,15 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
             buffer.add_transition(obs, [Q1, Q2], next_obs, reward, done)
 
         elif args.reward_type == 3:
-            # 큐에 push
             obs_q.append(obs);   act_q.append([Q1, Q2])
             tsp_q.append([Tsp1[k], Tsp2[k]])
             temp_q.append([T1, T2])
 
-            # n-step reward가 준비되면 pop & 저장
             if len(obs_q) >= N:
                 s_t      = obs_q.popleft()
                 a_t      = act_q.popleft()
-                tsp_now  = tsp_q.popleft()
-                t_future = temp_q.pop()          # N-step 뒤 온도
+                tsp_now  = tsp_q.popleft()       # 맨 앞 요소 제거  / 왼쪽 방향
+                t_future = temp_q.pop()          # 맨 뒤 요소 제거  / 오른쪽 방향 
 
                 err1 = tsp_now[0] - t_future[0]
                 err2 = tsp_now[1] - t_future[1]
@@ -389,7 +372,6 @@ def online_finetune(args):
         buffer.save(final_buf_path)
     print(f"replay buffer 저장 완료 : {final_buf_path}")
 
-    # ---------------------- Extra evaluation (seed 2/3/4) ---------------------- #
     if args.eval_seeds:
         print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
 
@@ -418,19 +400,9 @@ def online_finetune(args):
      #       tbl.add_data(r["seed"], r["total_error"], r["total_return"])
      #   wandb.log({"extra_eval_table": tbl})
         tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
-
         for r in extra_rows:
-            seed = r.get("seed")
-            err  = r.get("total_error")
-            ret  = r.get("total_return")
-
-            if isinstance(err, (int, float)) and isinstance(ret, (int, float)):
-                tbl.add_data(seed, err, ret)
-            else:
-                print(f"⚠️ 테이블 생략: seed={seed}, error={err}, return={ret}")
-
+            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
         wandb.log({"extra_eval_table": tbl})
-
 
         avg_return = np.mean([m["total_return"] for m in extra_rows])
         avg_error = np.mean([m["total_error"] for m in extra_rows])
@@ -475,10 +447,13 @@ if __name__ == "__main__":
     # 6개 obs C:/Users/Developer/TCLab/IQL/sam/tclab-mpc-iql/05-07-25_13.28.11_gigk/best.pt
     
     #parser.add_argument('--pt-path', default = "C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/05-07-25_18.08.30_lzec/ep10.pt")
-    parser.add_argument('--pt-path', default="C:\\Users\\User\\tclab1\\IQL\\sam\\tclab-mpc-iql\\05-10-25_18.14.24_tplg\\best.pt" )
+    # 해당 pt 정보 : reward type 3 / tau 0.99 / 
+    #C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\offline best\\best.pt
+    parser.add_argument('--pt-path', default="C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\offline best\\best.pt")
+    # parser.add_argument('--pt-path', default="C:\Users\Developer\TCLabIQL/sam/tclab-mpc-iql/05-14-25_09.05.24_zfsq/best.pt") => sampling interval 1 인 future pt file 
     # 오프라인 학습으로 가장 성능 좋은 pt 파일 , 경로 아래 
-    #parser.add_argument('--pt-path',  default="C:\\Users\\Developer\\TCLab\\IQL\\cum_reward\\tclab-mpc-iql\\04-30-25_11.09.02_usmn\\best.pt")
-    parser.add_argument('--scaler', default="C:\\Users\\User\\tclab1\\Data\\first_reward.pkl")
+    parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/future.pkl")
+
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
     parser.add_argument('--log-dir', default="./logs_online_realkit")
@@ -487,9 +462,9 @@ if __name__ == "__main__":
     #n_episodes=100, update_per_episode=60
     # 1000
 # 탐색이 있는 온라인 fine-tune, 20~30 epoch 목표
-    parser.add_argument('--n-episodes',         type=int, default=20)   # 총 episode
+    parser.add_argument('--n-episodes',         type=int, default=250)   # 총 episode
     parser.add_argument('--update_per_episode', type=int, default=30)   # episode마다 60 update
-    parser.add_argument('--n-steps',            type=int, default=800) # 9 000 step보다 약간 크게
+    parser.add_argument('--n-steps',            type=int, default=7500) # 9 000 step보다 약간 크게
 
     parser.add_argument('--warmup-episodes', type=int, default=0,
                     help='초기 rollout만 수행하고 업데이트는 생략할 에피소드 수')
@@ -498,7 +473,7 @@ if __name__ == "__main__":
     parser.add_argument('--hidden-dim', type=int, default=256)
     parser.add_argument('--n-hidden', type=int, default=2)
     parser.add_argument('--discount', type=float, default=0.99)
-    parser.add_argument('--tau', type=float, default=0.8)
+    parser.add_argument('--tau', type=float, default=0.99)
     parser.add_argument('--beta', type=float, default=3.0)
     parser.add_argument('--alpha', type=float, default=0.005)
     parser.add_argument('--seed', type=int, default=3)
@@ -510,23 +485,20 @@ if __name__ == "__main__":
                         help="SAM perturbation 반경 ρ")
 
 
-    parser.add_argument("--init-buffer", default='', help="시작 시 불러올 .npz 버퍼 경로")
-
-
-    parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / tclab kit)")
+    parser.add_argument("--init-buffer", default="C:/Users/Developer/TCLab/Data/future.npz",
+                         help="시작 시 불러올 .npz 버퍼 경로")
+    parser.add_argument("--type", default="real", help="rollout 종류 설정 (simulator / real)")
     parser.add_argument("--save-buffer-path", default="./saved_buffer.npz",
                     help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
     parser.add_argument("--save-buffer-every", type=int, default=2,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
     parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
-    parser.add_argument("--reward_type", type=int, default=1)
-
-    # 📌 추가: extra evaluation seeds
+    parser.add_argument("--reward_type", type=int, default=3)
     parser.add_argument(
         "--eval-seeds",
         nargs="*",
         type=int,
-        default=None,
+        default=[0, 1, 2],
         help="추가 평가용 random seed 목록 (예: --eval-seeds 0 1 2 )",
     )
 
@@ -534,3 +506,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args.scaler)
     online_finetune(args)
+
+
+

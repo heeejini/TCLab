@@ -52,8 +52,8 @@ reward_scaler = StandardScaler()
 def compute_reward(acc_error1, acc_error2, reward_scaler):
     raw_reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
     #reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
-  #  scaled = reward_scaler.transform([[raw_reward]])[0][0]
-    return raw_reward
+    scaled = reward_scaler.transform([[raw_reward]])[0][0]
+    return scaled
 import numpy as np
 from tclab import TCLab
 from src.mpc_lib import mpc, mpc_init
@@ -314,8 +314,10 @@ def simulator_policy(
             # n-step future 기준: TSP_t - T_{t+n}
             n = 5  
             j = min(k + n, steps - 1)
-            env.update(t=j * dt)  # t+n 시점까지 환경 갱신
-            future_T1, future_T2 = env.T1, env.T2
+            print(f"_____{j}\n")
+           # env.update(t=j * dt)  # t+n 시점까지 환경 갱신
+            # buffer 에서 가져오기
+            future_T1, future_T2 = T1[j], T2[j]   # ← env 건드리지 않음
             err1 = Tsp1[k] - future_T1
             err2 = Tsp2[k] - future_T2
                     
