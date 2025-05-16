@@ -40,11 +40,12 @@ class GaussianPolicy(nn.Module):
 # GaussianPolicy 내부에 추가
 # ──────────────────────────────────────────
     def new_action(
+            #exp_prob = 0.5, noise_std = 10 
         self,
         obs: torch.Tensor,
         deterministic: bool = False,
         enable_grad: bool = False,
-        exp_prob: float = 0.3,    # ε-탐색 확률
+        exp_prob: float = 0.5,    # ε-탐색 확률
         noise_std: float = 10.0    # 기본 노이즈 세기
     ) -> torch.Tensor:
         """

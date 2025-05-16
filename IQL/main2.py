@@ -46,7 +46,7 @@ def main(args):
     torch.set_num_threads(1)
 
     wandb.init(
-        project="tclab-project1",
+        project="tclab-project-offline",
         name=args.exp_name,
         entity="jhj0628",
         config=vars(args),
@@ -336,14 +336,14 @@ if __name__ == "__main__":
     #C:\Users\Developer\TCLab\Data\future_1step.npz 
 
     #C:\Users\Developer\TCLab\Data\reward\first.npz
-    parser.add_argument("--npz-path", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\second.npz")
-    parser.add_argument("--scaler", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\second.pkl")
+    parser.add_argument("--npz-path", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\first.npz")
+    parser.add_argument("--scaler", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\first.pkl")
 
     parser.add_argument("--sam", action="store_true", help="Sharpness-Aware Minimization 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.03, help="SAM perturbation half-width (ρ)")
 
     parser.add_argument("--method", default="simulator")
-    parser.add_argument("--reward_type", type=int, default=2)
+    parser.add_argument("--reward_type", type=int, default=1)
 
     parser.add_argument(
         "--eval-seeds",

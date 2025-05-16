@@ -188,7 +188,7 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
             # act / online_act / directional_override_act / error_act  / reverse_error_act / hybrid_reverse_act
-            act = policy.new_action1(torchify(obs),
+            act = policy.new_action(torchify(obs),
                              deterministic=args.deterministic_policy).cpu().numpy()
 
         Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
