@@ -187,9 +187,10 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 
         obs = np.array([T1, T2, Tsp1[k], Tsp2[k]], dtype=np.float32)
         with torch.no_grad():
-            # act / online_act / directional_override_act / error_act 
-            act = policy.act(torchify(obs),
+            # act / online_act / directional_override_act / error_act  / reverse_error_act / hybrid_reverse_act
+            act = policy.new_action1(torchify(obs),
                              deterministic=args.deterministic_policy).cpu().numpy()
+
         Q1, Q2 = float(np.clip(act[0], 0, 100)), float(np.clip(act[1], 0, 100))
         env.Q1(Q1); env.Q2(Q2)
 
@@ -339,8 +340,7 @@ def online_finetune(args):
 
         try:
             total_error = (
-                metrics["E1"] + metrics["E2"] +
-                metrics["Over"] + metrics["Under"]
+                metrics["E1"] + metrics["E2"] 
             )
             metrics["total_error"] = total_error
         except KeyError:
@@ -381,8 +381,7 @@ def online_finetune(args):
             tmp_args.seed = s
             metrics = eval_policy(iql.policy, tmp_args)
 
-            total_error = (metrics["E1"] + metrics["E2"] +
-                        metrics["Over"] + metrics["Under"])
+            total_error = (metrics["E1"] + metrics["E2"])
             metrics.update({"total_error": total_error, "seed": s})
 
             # 콘솔 출력
@@ -449,10 +448,13 @@ if __name__ == "__main__":
     #parser.add_argument('--pt-path', default = "C:/Users/Developer/TCLab/IQL/logs_online_realkit/tclab-online/05-07-25_18.08.30_lzec/ep10.pt")
     # 해당 pt 정보 : reward type 3 / tau 0.99 / 
     #C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\offline best\\best.pt
-    parser.add_argument('--pt-path', default="C:\\Users\\Developer\\TCLab\\IQL\\sam\\tclab-mpc-iql\\offline best\\best.pt")
+    # C:\Users\Developer\TCLab\IQL\new\tclab-mpc-iql\first_reward\best.pt
+    parser.add_argument('--pt-path', default="C:\\Users\\Developer\\TCLab\\IQL\\new\\tclab-mpc-iql\\first_reward\\best.pt")
     # parser.add_argument('--pt-path', default="C:\Users\Developer\TCLabIQL/sam/tclab-mpc-iql/05-14-25_09.05.24_zfsq/best.pt") => sampling interval 1 인 future pt file 
     # 오프라인 학습으로 가장 성능 좋은 pt 파일 , 경로 아래 
-    parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/future.pkl")
+    # C:\Users\Developer\TCLab\Data\reward\first.pkl
+    parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/reward/first.pkl")
+
 
     parser.add_argument('--exp_name', default="online_ft")
     parser.add_argument('--env-name', default="tclab-online")
@@ -484,16 +486,16 @@ if __name__ == "__main__":
     parser.add_argument("--sam-rho", type=float, default=0.05,
                         help="SAM perturbation 반경 ρ")
 
-
-    parser.add_argument("--init-buffer", default="C:/Users/Developer/TCLab/Data/future.npz",
+# C:\Users\Developer\TCLab\Data\reward\first.npz
+    parser.add_argument("--init-buffer", default="C:/Users/Developer/TCLab/Data/reward/first.npz",
                          help="시작 시 불러올 .npz 버퍼 경로")
-    parser.add_argument("--type", default="real", help="rollout 종류 설정 (simulator / real)")
+    parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / real)")
     parser.add_argument("--save-buffer-path", default="./saved_buffer.npz",
                     help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
     parser.add_argument("--save-buffer-every", type=int, default=2,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
     parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
-    parser.add_argument("--reward_type", type=int, default=3)
+    parser.add_argument("--reward_type", type=int, default=1)
     parser.add_argument(
         "--eval-seeds",
         nargs="*",

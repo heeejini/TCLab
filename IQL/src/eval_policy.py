@@ -27,18 +27,6 @@ from collections import deque
 
 from tclab import setup, TCLab  # 시뮬레이터 & 실제
 
-# def compute_reward(e1, e2):
-#     return -math.hypot(e1, e2)
-
-# def compute_reward(acc_error1, acc_error2, E1=1.0, E2=1.0):
-#     return - (E1 * acc_error1 + E2 * acc_error2)
-
-EPS = 1e-6
-REWARD_MIN = -26.0 
-REWARD_MAX = -6.0  
-
-E1, E2 = 1.0,1.0
-
 
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -178,62 +166,6 @@ def generate_random_tsp(
     return tsp
 
 
-def simulate_mpc_episode(seed, args):
-    
-    from .util import torchify, set_seed
-    # 1) 재현성
-    set_seed(seed)
-    np.random.seed(seed)
-
-    steps = int(args.max_episode_steps / args.sample_interval)
-    dt    = args.sample_interval
-
-    # 2) 데이터 버퍼
-    T1 = np.zeros(steps);  T2 = np.zeros(steps)
-    Q1 = np.zeros(steps);  Q2 = np.zeros(steps)
-
-    Tsp1 = generate_random_tsp(args.max_episode_steps, dt)
-    Tsp2 = generate_random_tsp(args.max_episode_steps, dt)
-
-    # 3) 시뮬레이터 인스턴스
-    lab = setup(connected=False)
-    env = lab()                 # TCLabModel 객체
-    env.T_amb = args.ambient
-    env.Q1 = 0; env.Q2 = 0      # 초기화
-
-    mpc_init()
-
-    total_ret = e1 = e2 = over = under = 0.0
-
-    for k in range(steps):
-        # 현재 온도 읽기
-        T1[k] = env.T1
-        T2[k] = env.T2
-
-        # ﻿누적 오차
-        err1 = Tsp1[k] - T1[k]
-        err2 = Tsp2[k] - T2[k]
-        e1  += abs(err1);  e2 += abs(err2)
-        over += max(0, -err1) + max(0, -err2)
-        under+= max(0,  err1) + max(0,  err2)
-        total_ret += -np.hypot(err1, err2)
-
-        # MPC 제어 --> 히터 설정
-        q1, q2 = mpc(T1[k], Tsp1[k], T2[k], Tsp2[k])
-        Q1[k] = q1;  env.Q1 = q1
-        Q2[k] = q2;  env.Q2 = q2
-
-        # 시뮬레이터 한 스텝 진행
-        env.update(dt)
-
-    return dict(
-        T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2,
-        Q1=Q1, Q2=Q2,
-        total_return=total_ret,
-        E1=e1, E2=e2, Over=over, Under=under,
-    )
-
-
 # ────────────────────────────────
 # 1) 시뮬레이터 평가 함수
 # ────────────────────────────────
@@ -279,7 +211,7 @@ def simulator_policy(
     T1 = np.zeros(steps); T2 = np.zeros(steps)
     Q1 = np.zeros(steps); Q2 = np.zeros(steps)
 
-    total_ret = e1 = e2 = over = under = 0.0
+    total_ret = e1 = e2  = 0.0
     policy.eval()
 
     for k in trange(steps, desc="sim"):  # 1 s per step
@@ -327,8 +259,7 @@ def simulator_policy(
         reward = compute_reward(err1, err2, reward_scaler)
         total_ret += reward
         e1 += abs(err1); e2 += abs(err2)
-        over += max(0, -err1) + max(0, -err2)
-        under += max(0, err1) + max(0, err2)
+    
 
     # CSV & 그래프 저장
     csv_path = run_dir / "rollout.csv"
@@ -346,7 +277,7 @@ def simulator_policy(
     plt.tight_layout(); plt.savefig(run_dir / "rollout.png"); plt.close()
 
     return dict(T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2, Q1=Q1, Q2=Q2,
-                total_return=total_ret, E1=e1, E2=e2, Over=over, Under=under)
+                total_return=total_ret, E1=e1, E2=e2)
 
 # ────────────────────────────────
 # 2) 실제 장비(TCLab) 평가 함수
@@ -386,7 +317,7 @@ def tclab_policy(
         T1 = np.zeros(steps); T2 = np.zeros(steps)
         Q1 = np.zeros(steps); Q2 = np.zeros(steps)
 
-        total_ret = e1 = e2 = over = under = 0.0
+        total_ret = e1 = e2 = 0.0
         policy.eval()
 
         if reward_type == 3:
@@ -434,8 +365,6 @@ def tclab_policy(
             total_ret += reward
 
             e1 += abs(err1);  e2 += abs(err2)
-            over += max(0, -err1) + max(0, -err2)
-            under += max(0,  err1) + max(0,  err2)
 
         arduino.Q1(0); arduino.Q2(0)
 
@@ -463,5 +392,5 @@ def tclab_policy(
         T1=T1, T2=T2, Tsp1=Tsp1, Tsp2=Tsp2,
         Q1=Q1, Q2=Q2,
         total_return=total_ret,
-        E1=e1, E2=e2, Over=over, Under=under
+        E1=e1, E2=e2
     )

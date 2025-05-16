@@ -172,8 +172,6 @@ def main(args):
                 total_error = (
                     full_log["E1"]
                     + full_log["E2"]
-                    + full_log["Over"]
-                    + full_log["Under"]
                 )
             except KeyError:
                 total_error = np.inf
@@ -255,8 +253,7 @@ def main(args):
             tmp_args.seed = s
             metrics = eval_policy(iql.policy, tmp_args)
 
-            total_error = (metrics["E1"] + metrics["E2"] +
-                        metrics["Over"] + metrics["Under"])
+            total_error = (metrics["E1"] + metrics["E2"])
             metrics.update({"total_error": total_error, "seed": s})
 
 
@@ -310,7 +307,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--env-name", default="tclab-mpc-iql")
-    parser.add_argument("--log-dir", default="./sam")
+    parser.add_argument("--log-dir", default="./new")
     parser.add_argument("--seed", type=int, default=3)
 
     # 모델 & 학습 파라미터
@@ -321,7 +318,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--alpha", type=float, default=0.005)
-    parser.add_argument("--tau", type=float, default=0.99)
+    parser.add_argument("--tau", type=float, default=0.8)
     parser.add_argument("--beta", type=float, default=3.0)
     parser.add_argument(
         "--stochastic-policy", action="store_false", dest="deterministic_policy"
@@ -336,14 +333,17 @@ if __name__ == "__main__":
     # future_10step
     # C:\Users\Developer\TCLab\Data\first_reward.pkl
     # C:\Users\Developer\TCLab\Data\first_reward.npz
-    parser.add_argument("--npz-path", default="C:/Users/Developer/TCLab/Data/future.npz")
-    parser.add_argument("--scaler", default="C:/Users/Developer/TCLab/Data/future.pkl")
+    #C:\Users\Developer\TCLab\Data\future_1step.npz 
+
+    #C:\Users\Developer\TCLab\Data\reward\first.npz
+    parser.add_argument("--npz-path", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\second.npz")
+    parser.add_argument("--scaler", default="C:\\Users\\Developer\\TCLab\\Data\\reward\\second.pkl")
 
     parser.add_argument("--sam", action="store_true", help="Sharpness-Aware Minimization 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.03, help="SAM perturbation half-width (ρ)")
 
     parser.add_argument("--method", default="simulator")
-    parser.add_argument("--reward_type", type=int, default=3)
+    parser.add_argument("--reward_type", type=int, default=2)
 
     parser.add_argument(
         "--eval-seeds",
