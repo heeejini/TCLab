@@ -37,8 +37,8 @@ reward_scaler = StandardScaler()
 
 # def compute_reward(e1, e2):
 #     return -math.hypot(e1, e2)
-def compute_reward(acc_error1, acc_error2, reward_scaler):
-    raw_reward = - np.sqrt(acc_error1**2 + acc_error2 ** 2)
+def compute_reward(error1, error2, reward_scaler):
+    raw_reward = - np.sqrt(error1**2 + error2 ** 2)
     #reward = - np.sqrt((E1 * acc_error1)**2 + (E2 * acc_error2)**2)
     scaled = reward_scaler.transform([[raw_reward]])[0][0]
     return scaled
@@ -116,7 +116,7 @@ from src.mpc_lib import mpc, mpc_init
 def generate_random_tsp(
     total_time_sec: int = 1200,
     dt: float = 5.0,
-    low: float = 25.0,
+    low: float = 29.0,
     high: float = 65.0,
     verbose: bool = False,
 ) -> np.ndarray:
@@ -229,12 +229,12 @@ def simulator_policy(
         # ▒▒ 에러 계산 분기 ▒▒
         if reward_type == 1:
             # 현재 시점 기준
-            print(f"reward type : {reward_type}")
+          #  print(f"reward type : {reward_type}")
             err1 = Tsp1[k] - T1[k]
             err2 = Tsp2[k] - T2[k]
         elif reward_type == 2:
             # 다음 시점 기준
-            print(f"reward type : {reward_type}")
+          #  print(f"reward type : {reward_type}")
             next_T1, next_T2 = env.T1, env.T2
             if k < steps - 1:
                 err1 = Tsp1[k + 1] - next_T1
@@ -246,7 +246,7 @@ def simulator_policy(
             # n-step future 기준: TSP_t - T_{t+n}
             n = 5  
             j = min(k + n, steps - 1)
-            print(f"_____{j}\n")
+         #   print(f"_____{j}\n")
            # env.update(t=j * dt)  # t+n 시점까지 환경 갱신
             # buffer 에서 가져오기
             future_T1, future_T2 = T1[j], T2[j]   # ← env 건드리지 않음
@@ -306,7 +306,7 @@ def tclab_policy(
     with TCLab() as arduino:
         arduino.LED(100)
         arduino.Q1(0); arduino.Q2(0)
-
+        print(ambient)
         while arduino.T1 > ambient or arduino.T2 > ambient:
             time.sleep(10)
 
