@@ -52,7 +52,11 @@ st.markdown(
 st.title("🌡️ TCLab IQL 실시간 제어 대시보드")
 
 # 사용자 입력
-temp_str = st.text_input("🎯 목표 온도들을 쉼표로 입력하세요 (예: 35,45,55)", "35,45,55")
+col1, col2 = st.columns(2)
+with col1:
+    temp1_str = st.text_input("🎯 목표 온도 TSP1 (쉼표로 입력)", "35,45,55")
+with col2:
+    temp2_str = st.text_input("🎯 목표 온도 TSP2 (쉼표로 입력)", "40,50,60")
 mode = st.radio("🧪 실행 환경을 선택하세요", ["Simulator", "Real Kit"], horizontal=True)
 run_button = st.button("🚀 제어 시작")
 
@@ -93,14 +97,16 @@ def generate_tsp(values, total_time=1200, dt=5.0):
 
 if run_button:
     try:
-        values = [float(v) for v in temp_str.split(",")]
-        assert all(29 <= t <= 65 for t in values)
+        values1 = [float(v) for v in temp1_str.split(",")]
+        values2 = [float(v) for v in temp2_str.split(",")]
+        assert all(29 <= t <= 65 for t in values1 + values2)
     except:
         st.error("❌ 온도는 29~65 사이의 숫자만 쉼표로 입력해야 합니다.")
         st.stop()
 
-    Tsp1 = generate_tsp(values)
-    Tsp2 = generate_tsp(values)
+    Tsp1 = generate_tsp(values1)
+    Tsp2 = generate_tsp(values2)
+
     steps = len(Tsp1)
     T1_list, T2_list = [], []
     Q1_list, Q2_list = [], []
