@@ -1,12 +1,11 @@
-# 🔥 TCLab Project: Control + Offline RL + Evaluation
+# 🔥 TCLab Project
+TCLab 키트로 수집한 MPC 데이터를 기반으로 IQL 모델을 학습하고, 이를 활용하여 실제 환경에서도 적절한 온도 제어 RL 모델 구현하는 것이 본 실험의 목적
 
-본 프로젝트는 Temperature Control Lab (TCLab)키트를 기반으로, 실제 물리 시스템을 제어하며 MPC (Model Predictive Control) 데이터를 수집하고, 이를 바탕으로 Offline Reinforcement Learning (Implicit Q-Learning, IQL)을 학습시키는 실험을 수행합니다.
 
 ---
 
 ## 📌 What is TCLab?
-
-[TCLab (Temperature Control Lab)](https://apmonitor.com/pdc/index.php/Main/ArduinoTemperatureControl) 는 BYU(Brigham Young University)에서 제작한 실험 키트로, **2개의 히터(Q1, Q2)**와 **2개의 온도 센서(T1, T2)**를 통해 **MIMO 제어 시스템**을 학습하고 테스트할 수 있는 물리적 장치입니다.
+[TCLab (Temperature Control Lab)](https://apmonitor.com/pdc/index.php/Main/ArduinoTemperatureControl)는 BYU(Brigham Young University)에서 제작한 실험 키트로, 2개의 히터(Q1, Q2)와 2개의 온도 센서(T1, T2)를 통해 MIMO 제어 시스템을 학습하고 테스트할 수 있는 물리적 장치이다.
 
 ---
 
@@ -43,6 +42,9 @@
 ## 결과 
 - Inference 시에 3개의 Inference 용 에피소드로 성능 측정 
 - Online tuning >  MPC > Offline training 순의 결과 
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/078fe0b8-600b-464e-b33e-74c187296045" width="400"/>
+</div>
 
 
 - Online tuning 으로 환경에 대한 데이터를 직접 수집하여, 환경에 대해 더욱 잘 적응한 모델을 구축 
