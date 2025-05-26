@@ -66,7 +66,7 @@ class ExperienceBufferManager:
         err1 = np.abs(obs[:, 2] - obs[:, 0])
         err2 = np.abs(obs[:, 3] - obs[:, 1])
 
-        print(f"🔍 Buffer Summary:")
+        print(f"Buffer Summary:")
         print(f"- Num transitions: {len(self)}")
         print(f"- Q1 range: {acts[:, 0].min():.1f} ~ {acts[:, 0].max():.1f}")
         print(f"- Q2 range: {acts[:, 1].min():.1f} ~ {acts[:, 1].max():.1f}")
