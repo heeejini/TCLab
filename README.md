@@ -32,7 +32,12 @@
 ### Step 4. **평가**
 - 평가 메트릭으로 설정한 두 가지 지표를 통해서 성능 평가 
 - Average total return : 평가용 에피소드 3개에서 얻은 총 리턴의 평균
-- Average total error : 평가용 에피소드 3개에서 계산된 총 오차 (E1 + E2) 의 평균 
+- Average total error : 평가용 에피소드 3개에서 계산된 총 오차 (E1 + E2) 의 평균
+
+
+
+  ![image](https://github.com/user-attachments/assets/cef62cc8-6da4-48af-b92e-0528ad8f6c9e)
+
 
 ---
 
