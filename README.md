@@ -22,6 +22,7 @@ TCLab 키트로 수집한 MPC 데이터를 기반으로 IQL 모델을 학습하�
 
 ### Step 2. **Offline RL 학습 (IQL)**
 - 수집된 MPC 데이터를 기반으로 Implicit Q-Learning 학습
+- 이 때, IQL 모델은 https://github.com/gwthomas/IQL-PyTorch.git 구현을 사용함 
 
 ### Step 3. **Online 튜닝 (IQL)**
 - Offline 학습한 IQL 모델을 통해서 Online fine-tuning 진행 
