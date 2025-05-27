@@ -6,10 +6,13 @@ import random
 import string
 import sys
 
-import numpy as np
 import torch
 import torch.nn as nn
 from .eval_policy import simulator_policy, tclab_policy
+
+from dataclasses import dataclass, field
+import torch, numpy as np, wandb
+import copy 
 
 DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -91,24 +94,6 @@ def sample_batch(dataset, batch_size):
         assert len(v) == n, 'Dataset values must have same length'
     indices = torch.randint(low=0, high=n, size=(batch_size,), device=device)
     return {k: v[indices] for k, v in dataset.items()}
-
-
-# def evaluate_policy(env, policy, max_episode_steps, deterministic=True):
-#     # 학습된 정책을 실제로 평가해서 총 reward 를 측정, offline 학습 이후에 policy의 성능을 평가할 때 사용
-#     obs = env.reset()
-#     total_reward = 0.
-#     for _ in range(max_episode_steps):
-#         with torch.no_grad():
-#             action = policy.act(torchify(obs), deterministic=deterministic).cpu().numpy()
-#         next_obs, reward, done, info = env.step(action)
-#         total_reward += reward
-#         if done:
-#             break
-#         else:
-#             obs = next_obs
-#     return total_reward
-####
-# simluator 랑 tclab 실제에서의 evaluate_policy 가 필요할 것 
 
 
 
@@ -202,9 +187,128 @@ class Log:
         if self.flush:
             self.csv_file.flush()
 
-
-
     def close(self):
         self.txt_file.close()
         if self.csv_file is not None:
             self.csv_file.close()
+
+@dataclass
+class MetricTracker:
+    log_dir: Path
+    best_total_error: float = field(default=float("inf"))
+    best_total_return: float = field(default=-float("inf"))
+    best_q_loss: float = field(default=float("inf"))
+    best_v_loss: float = field(default=float("inf"))
+    best_policy_loss: float = field(default=float("inf"))
+    best_step: int = field(default=-1)
+
+    def update_best(self, metrics: dict, step: int, agent_state, prefix=""):
+        updated = False
+
+        total_error   = metrics.get("E1", 0) + metrics.get("E2", 0)
+        total_return  = metrics.get("total_return", -1e9)
+
+        def save(tag):
+            torch.save(agent_state, self.log_dir / f"{prefix}{tag}.pt")
+
+        if total_error < self.best_total_error:
+            self.best_total_error = total_error
+            self.best_step = step
+            save("best")
+            updated = True
+
+        if total_return > self.best_total_return:
+            self.best_total_return = total_return
+            save("best_return")
+
+        for loss_name, best_attr in [("q_loss", "best_q_loss"),
+                                     ("v_loss", "best_v_loss"),
+                                     ("policy_loss", "best_policy_loss")]:
+            if metrics.get(loss_name, 1e9) < getattr(self, best_attr):
+                setattr(self, best_attr, metrics[loss_name])
+                save(f"best_{loss_name.split('_')[0]}")
+
+        return updated
+
+
+class EarlyStopping:
+    def __init__(self, patience=6, min_delta_err=0.5, min_delta_ret=1.0):
+        self.patience = patience
+        self.min_delta_err = min_delta_err
+        self.min_delta_ret = min_delta_ret
+        self.no_improve_cnt = 0
+        self.prev_best_error = float("inf")
+        self.prev_best_return = -float("inf")
+
+    def step(self, total_error, total_return):
+        improved = False
+        if (self.prev_best_error - total_error) > self.min_delta_err:
+            improved = True
+            self.no_improve_cnt = 0
+            self.prev_best_error = total_error
+        elif (total_return - self.prev_best_return) > self.min_delta_ret:
+            improved = True
+            self.no_improve_cnt = 0
+            self.prev_best_return = total_return
+        else:
+            self.no_improve_cnt += 1
+
+        stop = self.no_improve_cnt >= self.patience
+        return stop, improved
+
+
+
+def evaluate_extra_seeds(policy, args, log, eval_fn, filename="extra_eval.csv"):
+    print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
+
+    extra_rows = []
+    for s in args.eval_seeds:
+        tmp_args = copy.copy(args)
+        tmp_args.seed = s
+        metrics = eval_fn(policy, tmp_args)
+
+        total_error = metrics["E1"] + metrics["E2"]
+        metrics.update({"total_error": total_error, "seed": s})
+
+        print(f"\n  Seed {s}:")
+        print(f"    total_return = {metrics['total_return']:.3f}")
+        print(f"    total_error  = {metrics['total_error']:.3f}")
+
+        extra_rows.append(metrics)
+        log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
+        wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
+
+    avg_return = np.mean([m["total_return"] for m in extra_rows])
+    avg_error  = np.mean([m["total_error"] for m in extra_rows])
+    avg_metrics = {
+        "seed": "avg",
+        "total_return": avg_return,
+        "total_error": avg_error,
+    }
+
+    print(
+        f"\n📊 Avg over seeds {args.eval_seeds}: "
+        f"total_return = {avg_return:.3f},  total_error = {avg_error:.3f}"
+    )
+
+    wandb.log({
+        "extra_avg_total_return": avg_return,
+        "extra_avg_total_error": avg_error
+    })
+    log.row(avg_metrics)
+
+    tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
+    for r in extra_rows:
+        tbl.add_data(r["seed"], r["total_error"], r["total_return"])
+    wandb.log({"extra_eval_table": tbl})
+
+    csv_path = log.dir / filename
+    with open(csv_path, "w", newline="") as f:
+        fieldnames = list(extra_rows[0].keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(extra_rows)
+        writer.writerow(avg_metrics)
+
+    print(f"✅ Extra-evaluation results saved to {csv_path}")
+

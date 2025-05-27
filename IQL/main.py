@@ -11,7 +11,7 @@ from src.iql import ImplicitQLearning
 from src.policy import GaussianPolicy, DeterministicPolicy
 from src.value_functions import TwinQ, ValueFunction
 from src.util import (return_range, set_seed, Log, sample_batch, torchify,
-                      evaluate_policy_sim, evaluate_policy_tclab)
+                      evaluate_policy_sim, evaluate_policy_tclab, evaluate_extra_seeds, MetricTracker, EarlyStopping)
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -46,11 +46,11 @@ def main(args):
     torch.set_num_threads(1)
 
     wandb.init(
-        project="tclab-project-offline",
+        project="tclab-project1",
         name=args.exp_name,
-        entity="jhj0628",
         config=vars(args),
     )
+
 
 
     log = Log(Path(args.log_dir) / args.env_name, vars(args))
@@ -113,191 +113,59 @@ def main(args):
         adv.std().item(),
     )
 
-
-    best_total_error = float("inf")
-    best_total_return = -float("inf")
-    best_q_loss = float("inf")
-    best_v_loss = float("inf")
-    best_policy_loss = float("inf")
-    best_step = -1
-
-
-    patience = 6
-    min_delta_err = 0.5
-    min_delta_ret = 1.0
-    no_improve_cnt = 0
     stop_step = None
+    tracker = MetricTracker(log.dir)
+    early   = EarlyStopping(patience=6, min_delta_err=0.5, min_delta_ret=1.0)
 
-
+    stop_step = None                     
     for step in trange(args.n_steps):
         loss_dict = iql.update(**sample_batch(dataset, args.batch_size))
 
         if (step + 1) % 5_000 == 0:
             with torch.no_grad():
-                test_obs = dataset["observations"][:5000]
+                obs = dataset["observations"][:5000]
                 act = dataset["actions"][:5000]
-                adv = iql.qf(test_obs, act) - iql.vf(test_obs)
-
-                if isinstance(iql.policy, DeterministicPolicy):
-                    test_act = iql.policy(test_obs).cpu().numpy()
-                else:
-                    dist = iql.policy(test_obs)
-                    test_act = dist.sample().cpu().numpy()
-
-            print(
-                f"[Step {step+1}] Advantage mean={adv.mean():.4f}, "
-                f"std={adv.std():.4f}"
-            )
-            print(
-                f"[Debug {step+1}] action range : "
-                f"{test_act.min():.3f}  ~  {test_act.max():.3f}"
-            )
+                adv = iql.qf(obs, act) - iql.vf(obs)
+            print(f"[{step+1}] Advantage μ={adv.mean():.4f}, σ={adv.std():.4f}")
 
         if (step + 1) % args.eval_period == 0:
-            metrics = eval_policy(iql.policy, args)
-            metrics.update({"step": step + 1})
+            metrics = eval_policy(iql.policy, args)           # E1,E2,total_return …
+            metrics.update(loss_dict)                         # q_loss,v_loss,policy_loss
+            metrics["step"] = step + 1
+            metrics["total_error"] = metrics.get("E1", 0) + metrics.get("E2", 0)
 
-            full_log = loss_dict.copy()
-            full_log.update(metrics)
+            wandb.log(metrics);      log.row(metrics)
 
-            for k, v in full_log.items():
-                if isinstance(v, torch.Tensor):
-                    full_log[k] = v.item() if v.numel() == 1 else float(v.mean().item())
-                elif isinstance(v, (np.ndarray, list)):
-                    full_log[k] = float(np.mean(v))
-                elif not isinstance(v, (int, float)):
-                    full_log[k] = str(v)
+            tracker.update_best(metrics, step+1, iql.state_dict())
 
-            try:
-                total_error = (
-                    full_log["E1"]
-                    + full_log["E2"]
-                )
-            except KeyError:
-                total_error = np.inf
-            full_log["total_error"] = total_error
-
-            print(f"\n[Step {step+1}] Evaluation:")
-            for k, v in full_log.items():
-                if isinstance(v, float):
-                    print(f"  {k}: {v:.3f}")
-                else:
-                    print(f"  {k}: {v}")
-
-            prev_best_error = best_total_error
-            prev_best_return = best_total_return
-
-            if total_error < best_total_error:
-                best_total_error = total_error
-                best_step = step + 1
-                torch.save(iql.state_dict(), log.dir / "best.pt")
-                print(f"✅ [Step {step+1}] Best model saved!")
-
-            if full_log.get("total_return", -1e9) > best_total_return:
-                best_total_return = full_log["total_return"]
-                torch.save(iql.state_dict(), log.dir / "best_return.pt")
-
-            if full_log.get("q_loss", 1e9) < best_q_loss:
-                best_q_loss = full_log["q_loss"]
-                torch.save(iql.state_dict(), log.dir / "best_q.pt")
-
-            if full_log.get("v_loss", 1e9) < best_v_loss:
-                best_v_loss = full_log["v_loss"]
-                torch.save(iql.state_dict(), log.dir / "best_v.pt")
-
-            if full_log.get("policy_loss", 1e9) < best_policy_loss:
-                best_policy_loss = full_log["policy_loss"]
-                torch.save(iql.state_dict(), log.dir / "best_policy.pt")
-
-            log.row(full_log)
-            wandb.log(full_log)
-            
-            improved = False
-            if (prev_best_error - total_error) > min_delta_err:
-                improved = True
-                no_improve_cnt = 0
-            elif (full_log["total_return"] - prev_best_return) > min_delta_ret:
-                improved = True
-                no_improve_cnt = 0
-            else:
-                no_improve_cnt += 1
-                print(f"Early-stop patience {no_improve_cnt}/{patience}")
-
-            if no_improve_cnt >= patience:
+            stop, _ = early.step(metrics["total_error"], metrics["total_return"])
+            if stop:
                 stop_step = step + 1
-                print(f"\nEarly-Stopping triggered at step {stop_step} !")
+                print(f" Early-Stopping at step {stop_step}")
                 break
 
     torch.save(iql.state_dict(), log.dir / "final.pt")
-    if stop_step is not None:
-        with open(log.dir / "early_stop.txt", "w") as f:
-            f.write(
-                f"Stopped early at step {stop_step} "
-                f"(no improvement for {patience} evals)\n"
-            )
-
-    with open(log.dir / "best_info.txt", "w") as f:
-        f.write(f"Best Step (Total Error 기준): {best_step}\n")
-        f.write(f"Best Total Error: {best_total_error:.3f}\n")
-        f.write(f"Best Total Return: {best_total_return:.3f}\n")
-        f.write(f"Best Q Loss: {best_q_loss:.3f}\n")
-        f.write(f"Best V Loss: {best_v_loss:.3f}\n")
-        f.write(f"Best Policy Loss: {best_policy_loss:.3f}\n")
-
-    if args.eval_seeds:
-        print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
-
-        extra_rows = []
-        for s in args.eval_seeds:
-            tmp_args = copy.copy(args)
-            tmp_args.seed = s
-            metrics = eval_policy(iql.policy, tmp_args)
-
-            total_error = (metrics["E1"] + metrics["E2"])
-            metrics.update({"total_error": total_error, "seed": s})
-
-
-            print(f"\n  Seed {s}:")
-            print(f"    total_return = {metrics['total_return']:.3f}")
-            print(f"    total_error  = {metrics['total_error']:.3f}")
-
-            extra_rows.append(metrics)         
-            log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
-            wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
-
-        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
-        for r in extra_rows:
-            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
-        wandb.log({"extra_eval_table": tbl})
-
-        avg_return = np.mean([m["total_return"] for m in extra_rows])
-        avg_error = np.mean([m["total_error"] for m in extra_rows])
-
-
-        avg_metrics = {
-            "seed": "avg",
-            "total_return": avg_return,
-            "total_error": avg_error,
-        }
-
-        print(
-            f"\n📊 Avg over seeds {args.eval_seeds}: "
-            f"total_return = {avg_return:.3f},  total_error = {avg_error:.3f}"
+    if stop_step:
+        (log.dir / "early_stop.txt").write_text(
+            f"Stopped at step {stop_step} (no improvement for {early.patience} evals)\n"
         )
 
-        wandb.log({"extra_avg_total_return": avg_return, "extra_avg_total_error": avg_error})
-        log.row(avg_metrics)
+    with open(log.dir / "best_info.txt", "w") as f:
+        f.write(f"Best step           : {tracker.best_step}\n")
+        f.write(f"Best total_error    : {tracker.best_total_error:.3f}\n")
+        f.write(f"Best total_return   : {tracker.best_total_return:.3f}\n")
+        f.write(f"Best q_loss         : {tracker.best_q_loss:.3f}\n")
+        f.write(f"Best v_loss         : {tracker.best_v_loss:.3f}\n")
+        f.write(f"Best policy_loss    : {tracker.best_policy_loss:.3f}\n")
 
-        import csv
-
-        csv_path = log.dir / "extra_eval.csv"
-        with open(csv_path, "w", newline="") as f:
-            fieldnames = list(extra_rows[0].keys())
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(extra_rows)
-            writer.writerow(avg_metrics)
-        print(f"✅ Extra-evaluation results saved to {csv_path}")
+    if args.eval_seeds:
+        evaluate_extra_seeds(
+            policy=iql.policy,
+            args=args,
+            log=log,
+            eval_fn=eval_policy,       # → simulator / real 판단 포함
+            filename="extra_eval.csv"
+        )
 
     wandb.finish()
     log.close()
