@@ -60,8 +60,21 @@ def generate_tsp(method,
     return T1, T2
 
 st.set_page_config(page_title="TCLab 제어 대시보드", layout="wide")
-st.title("🌡️ TCLab - IQL 실시간 제어")
 
+# 패딩 값은 적절한 선으로 (예: 100px)
+st.markdown(
+    """
+    <style>
+        .main .block-container {
+            padding-left: 100px !important;
+            padding-right: 100px !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("🌡️ TCLab - IQL 실시간 제어")
 mode = st.radio("🥪 실행 환경", ["Simulator", "Real Kit"], horizontal=True)
 method = st.selectbox("🌟 TSP 생성 방식", ["사용자 지정", "Random", "Sin graph"])
 show_preview = st.checkbox("📈 TSP 미리보기", value=True)
