@@ -9,9 +9,10 @@ from pathlib import Path
 from datetime import datetime
 import json 
 from src.policy import GaussianPolicy, DeterministicPolicy
+from src.replay_buffer import ExperienceBufferManager 
 from src.value_functions import TwinQ, ValueFunction
 from src.iql import ImplicitQLearning
-from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab
+from src.util import torchify, Log, set_seed, sample_batch, evaluate_policy_sim, evaluate_policy_tclab, evaluate_extra_seeds
 from src.sam import SAM 
 from src.eval_policy import compute_reward 
 from collections import deque
@@ -240,7 +241,6 @@ def rollout_simulator(policy, buffer, reward_scaler, args):
 def online_finetune(args):
     torch.set_num_threads(1)
     
-    from replay_buffer import ExperienceBufferManager 
     buffer = ExperienceBufferManager()   
    
     log_dir = Path(args.log_dir)                
@@ -368,63 +368,14 @@ def online_finetune(args):
     print(f"replay buffer 저장 완료 : {final_buf_path}")
 
     if args.eval_seeds:
-        print("\n🔍 Extra evaluation with seeds:", args.eval_seeds)
-
-        extra_rows = []
-        for s in args.eval_seeds:
-            tmp_args = copy.copy(args)
-            tmp_args.seed = s
-            metrics = eval_policy(iql.policy, tmp_args)
-
-            total_error = (metrics["E1"] + metrics["E2"])
-            metrics.update({"total_error": total_error, "seed": s})
-
-            # 콘솔 출력
-            print(f"\n  Seed {s}:")
-            print(f"    total_return = {metrics['total_return']:.3f}")
-            print(f"    total_error  = {metrics['total_error']:.3f}")
-
-            extra_rows.append(metrics)         
-            log.row({f"extra_s{s}_{k}": v for k, v in metrics.items()})
-            wandb.log({f"extra_s{s}_{k}": v for k, v in metrics.items()})
-
-
-        tbl = wandb.Table(columns=["seed", "total_error", "total_return"])
-        for r in extra_rows:
-            tbl.add_data(r["seed"], r["total_error"], r["total_return"])
-        wandb.log({"extra_eval_table": tbl})
-
-        avg_return = np.mean([m["total_return"] for m in extra_rows])
-        avg_error = np.mean([m["total_error"] for m in extra_rows])
-
-        # 요청: avg_error 값을 total_error 로 간주
-        avg_metrics = {
-            "seed": "avg",
-            "total_return": avg_return,
-            "total_error": avg_error,
-        }
-
-        print(
-            f"\n📊 Avg over seeds {args.eval_seeds}: "
-            f"total_return = {avg_return:.3f},  total_error = {avg_error:.3f}"
+        evaluate_extra_seeds(
+            policy=iql.policy,
+            args=args,
+            log=log,
+            eval_fn=eval_policy,       
+            filename="extra_eval.csv"
         )
 
-        wandb.log({"extra_avg_total_return": avg_return, "extra_avg_total_error": avg_error})
-        log.row(avg_metrics)
-
-        # CSV 저장
-        import csv
-
-        csv_path = log.dir / "extra_eval.csv"
-        with open(csv_path, "w", newline="") as f:
-            fieldnames = list(extra_rows[0].keys())
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(extra_rows)
-            writer.writerow(avg_metrics)
-        print(f"✅ Extra-evaluation results saved to {csv_path}")
-
-    
     wandb.finish()
     log.close()
 
