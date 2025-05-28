@@ -28,7 +28,7 @@ def get_env_and_dataset(log, npz_path, max_episode_steps=None):
     return None, dataset
 
 def build_optimizer_factory(args):
-    if args.sam:  # Sharpness-Aware Minimization
+    if args.sam: 
         return lambda params: SAM(
             params,
             torch.optim.Adam,
@@ -51,18 +51,14 @@ def main(args):
         config=vars(args),
     )
 
-
-
     log = Log(Path(args.log_dir) / args.env_name, vars(args))
     log(f"Log dir: {log.dir}")
-
 
     env, dataset = get_env_and_dataset(log, args.npz_path, args.max_episode_steps)
     obs_dim = dataset["observations"].shape[1]
     act_dim = dataset["actions"].shape[1]
 
     set_seed(args.seed, env=env)
-
 
     if args.deterministic_policy:
         policy = DeterministicPolicy(
@@ -72,7 +68,6 @@ def main(args):
         policy = GaussianPolicy(
             obs_dim, act_dim, hidden_dim=args.hidden_dim, n_hidden=args.n_hidden
         )
-
 
     def eval_policy(policy, args):
         if args.method == "simulator":
@@ -129,8 +124,8 @@ def main(args):
             print(f"[{step+1}] Advantage μ={adv.mean():.4f}, σ={adv.std():.4f}")
 
         if (step + 1) % args.eval_period == 0:
-            metrics = eval_policy(iql.policy, args)           # E1,E2,total_return …
-            metrics.update(loss_dict)                         # q_loss,v_loss,policy_loss
+            metrics = eval_policy(iql.policy, args)          
+            metrics.update(loss_dict)                        
             metrics["step"] = step + 1
             metrics["total_error"] = metrics.get("E1", 0) + metrics.get("E2", 0)
 
@@ -163,7 +158,7 @@ def main(args):
             policy=iql.policy,
             args=args,
             log=log,
-            eval_fn=eval_policy,       # → simulator / real 판단 포함
+            eval_fn=eval_policy,       
             filename="extra_eval.csv"
         )
 
@@ -178,7 +173,7 @@ if __name__ == "__main__":
     parser.add_argument("--log-dir", default="./new")
     parser.add_argument("--seed", type=int, default=3)
 
-    # 모델 & 학습 파라미터
+
     parser.add_argument("--discount", type=float, default=0.99)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--n-hidden", type=int, default=2)
