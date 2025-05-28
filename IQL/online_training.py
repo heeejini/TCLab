@@ -43,10 +43,8 @@ def generate_random_tsp1(
     high: float = 65.0,
     verbose: bool = False,
 ) -> np.ndarray:
-    """
-    Set-point 구간별 정보를 로그로 출력.
-    각 구간 길이: 평균 480초, σ 100초, 최소 160초, 최대 800초
-    """
+    
+    #각 구간 길이: 평균 480초, σ 100초, 최소 160초, 최대 800초
     seed = int((time.time() * 1e6) % 1e9)  
     np.random.seed(seed)
     print(f"[🧪 TSP 생성용 시드: {seed}]")
@@ -73,7 +71,7 @@ def generate_random_tsp1(
         seg_id += 1
     print("-----------------------------------------------------------\n")
     return tsp
-from collections import deque           # ★ 추가
+from collections import deque           
 
 def rollout_tclab(policy, buffer, reward_scaler, args):
     """
@@ -146,7 +144,7 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
                     s_t      = obs_q.popleft()
                     a_t      = act_q.popleft()
                     tsp_now  = tsp_q.popleft() 
-                    t_future = temp_q.pop()      # N step 뒤 온도
+                    t_future = temp_q.pop()     
 
                     err1 = tsp_now[0] - t_future[0]
                     err2 = tsp_now[1] - t_future[1]
@@ -157,9 +155,6 @@ def rollout_tclab(policy, buffer, reward_scaler, args):
                 raise ValueError("reward_type must be 1, 2, or 3")
 
         arduino.Q1(0); arduino.Q2(0)
-
-
-from collections import deque
 
 def rollout_simulator(policy, buffer, reward_scaler, args):
     from tclab import setup
@@ -283,10 +278,10 @@ def online_finetune(args):
         start_episode = resume_data.get("last_episode", 0) + 1
         wandb_id      = resume_data.get("wandb_id", "")
         iql.load_state_dict(torch.load(log_dir / "last.pt"))
-        print(f"✅ Resumed from {start_episode} with last.pt")
+        print(f"Resumed from {start_episode} with last.pt")
     else:
         iql.load_state_dict(torch.load(args.pt_path))
-        print(f"🔁 Loaded pretrained IQL model from: {args.pt_path}")
+        print(f"Loaded pretrained IQL model from: {args.pt_path}")
         reward_scaler = joblib.load(args.scaler)
     wandb.init(
         project="tclab-project1",
@@ -322,7 +317,7 @@ def online_finetune(args):
             loss_dict = {"policy_loss": 0, "q_loss": 0, "v_loss": 0}
 
         if episode + 1 == args.warmup_episodes:
-            print("✅ Warm-up 종료. 현재 버퍼 상태 요약:")
+            print("Warm-up 종료. 현재 버퍼 상태 요약:")
             if hasattr(buffer, 'summary'):
                 buffer.summary()
       
@@ -340,14 +335,14 @@ def online_finetune(args):
             )
             metrics["total_error"] = total_error
         except KeyError:
-            print("⚠️ Warning: total_error 계산 실패 (E1, E2, Over, Under 누락)")
+            print("Warning: total_error 계산 실패 (E1, E2, Over, Under 누락)")
             total_error = None
 
         if total_error is not None and total_error < best_total_error:
             best_total_error = total_error
             best_state = copy.deepcopy(iql.state_dict())
             torch.save(iql.state_dict(), log.dir / 'best.pt')
-            print(f"[EP {episode}] ✅ Best model 저장됨 (total_error={total_error:.4f})")
+            print(f"[EP {episode}] Best model 저장됨 (total_error={total_error:.4f})")
 
         log.row(metrics)
         wandb.log(metrics)
@@ -396,6 +391,7 @@ if __name__ == "__main__":
     parser.add_argument('--update_per_episode', type=int, default=30)  
     parser.add_argument('--n-steps',            type=int, default=240 * 10  ) 
 
+
     parser.add_argument('--warmup-episodes', type=int, default=0,
                     help='초기 rollout만 수행하고 업데이트는 생략할 에피소드 수')
     parser.add_argument('--learning-rate', type=float, default=3e-4)
@@ -409,22 +405,23 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=3)
     parser.add_argument('--ambient', type=float, default=29.0)
     parser.add_argument('--stochastic-policy', action='store_false', dest='deterministic_policy')
+    
+    
     parser.add_argument("--sam", action="store_true",
                         help="SAM(Sharpness‑Aware Minimization) 사용 여부")
     parser.add_argument("--sam-rho", type=float, default=0.05,
                         help="SAM perturbation 반경 ρ")
 
-    parser.add_argument("--init-buffer", default="C:/Users/Developer/TCLab/Data/reward/first.npz",
-                         help="시작 시 불러올 .npz 버퍼 경로")
+
     parser.add_argument("--type", default="simulator", help="rollout 종류 설정 (simulator / real)")
+    
+    parser.add_argument("--init-buffer", default="C:/Users/Developer/TCLab/Data/reward/first.npz",
+                         help="시작 시 불러올 .npz 버퍼 경로")    
     parser.add_argument("--save-buffer-path", default="./saved_buffer.npz",
                     help="누적 rollout 을 저장할 .npz 경로 (빈 문자열이면 저장하지 않음)")
     parser.add_argument("--save-buffer-every", type=int, default=2,
                         help="N 에피소드마다 버퍼를 저장 (0이면 마지막에만 저장)")
     parser.add_argument("--resume", action="store_true", help="이전 학습 이어서 재개할지 여부")
-    parser.add_argument("--err_thr", required=False, default=5)
-    parser.add_argument("--noise_std" , required=False, default=5)
-
     parser.add_argument("--reward_type", type=int, default=1)
     parser.add_argument(
         "--eval-seeds",
